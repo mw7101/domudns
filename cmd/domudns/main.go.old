@@ -1,0 +1,163 @@
+package main
+
+import (
+	"context"
+	"flag"
+	"fmt"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+
+	"github.com/maik/lightweight-dns-stack/internal/blocklist"
+	"github.com/maik/lightweight-dns-stack/internal/caddy"
+	"github.com/maik/lightweight-dns-stack/internal/config"
+	"github.com/maik/lightweight-dns-stack/internal/coredns"
+	"github.com/maik/lightweight-dns-stack/internal/dns"
+	"github.com/maik/lightweight-dns-stack/internal/postgres"
+	"github.com/maik/lightweight-dns-stack/pkg/logger"
+	"github.com/rs/zerolog/log"
+	"golang.org/x/sync/errgroup"
+)
+
+var (
+	Version   = "dev"
+	BuildTime = "unknown"
+)
+
+func main() {
+	configPath := flag.String("config", "configs/config.yaml", "Path to configuration file")
+	genCorefile := flag.String("generate-corefile", "", "Generate Corefile and write to path, then exit")
+	flag.Parse()
+
+	cfg, err := config.Load(*configPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
+		os.Exit(1)
+	}
+
+	logger.Init(logger.Config{
+		Level:  cfg.System.LogLevel,
+		Format: cfg.System.LogFormat,
+	})
+
+	if *genCorefile != "" {
+		pgDSN := cfg.Postgres.PostgresDSN()
+		authZones := collectAuthZones(cfg, nil)
+		blocklistPath := ""
+		if cfg.Blocklist.Enabled && cfg.Blocklist.FilePath != "" {
+			blocklistPath = cfg.Blocklist.FilePath
+		}
+		corefile := coredns.GenerateCorefile(&cfg.CoreDNS, authZones, pgDSN, blocklistPath)
+		if err := os.WriteFile(*genCorefile, []byte(corefile), 0644); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to write Corefile: %v\n", err)
+			os.Exit(1)
+		}
+		log.Info().Str("path", *genCorefile).Msg("Corefile written")
+		return
+	}
+
+	log.Info().
+		Str("version", Version).
+		Str("build_time", BuildTime).
+		Msg("starting lightweight dns stack")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		sig := <-sigCh
+		log.Info().Str("signal", sig.String()).Msg("received shutdown signal")
+		cancel()
+	}()
+
+	pgClient, err := postgres.NewClient(ctx, cfg.Postgres.PostgresDSN(),
+		cfg.Postgres.MaxOpenConns,
+		cfg.Postgres.MaxIdleConns,
+		cfg.Postgres.ConnMaxLifetime.Duration(),
+		cfg.Postgres.RequestTimeout.Duration(),
+	)
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to connect to postgres")
+	}
+	defer pgClient.Close()
+
+	if cfg.Blocklist.Enabled && cfg.Blocklist.FilePath != "" {
+		if err := blocklist.RegenerateHostsFile(ctx, pgClient, cfg.Blocklist.FilePath, cfg.Blocklist.BlockIP4, cfg.Blocklist.BlockIP6); err != nil {
+			log.Warn().Err(err).Msg("initial blocklist regenerate failed")
+		}
+	}
+
+	// CoreDNS: spawn as subprocess if configured, else assume it runs separately (e.g. systemd)
+	if cfg.CoreDNS.Spawn {
+		authZones := collectAuthZones(cfg, pgClient)
+		pgDSN := cfg.Postgres.PostgresDSN()
+		blocklistPath := ""
+		if cfg.Blocklist.Enabled && cfg.Blocklist.FilePath != "" {
+			blocklistPath = cfg.Blocklist.FilePath
+		}
+		corefile := coredns.GenerateCorefile(&cfg.CoreDNS, authZones, pgDSN, blocklistPath)
+		binary := cfg.CoreDNS.Binary
+		if binary == "" {
+			binary = coredns.FindBinary()
+		}
+		runner := coredns.NewRunner(binary)
+		if err := runner.StartWithConfDir(ctx, corefile, cfg.CoreDNS.ConfDir); err != nil {
+			log.Fatal().Err(err).Msg("failed to start CoreDNS")
+		}
+		defer func() {
+			if err := runner.Stop(); err != nil {
+				log.Error().Err(err).Msg("CoreDNS stop")
+			}
+		}()
+	}
+
+	httpServer := caddy.NewServer(cfg, pgClient)
+
+	g, gctx := errgroup.WithContext(ctx)
+	g.Go(func() error {
+		if err := httpServer.Start(gctx); err != nil && err != http.ErrServerClosed {
+			return err
+		}
+		return nil
+	})
+
+	if cfg.Blocklist.Enabled && cfg.Blocklist.FilePath != "" {
+		adapter := &blocklist.PostgresFetchAdapter{Client: pgClient}
+		regen := func(c context.Context) {
+			_ = blocklist.RegenerateHostsFile(c, pgClient, cfg.Blocklist.FilePath, cfg.Blocklist.BlockIP4, cfg.Blocklist.BlockIP6)
+		}
+		g.Go(func() error { return blocklist.RunFetchLoop(gctx, adapter, cfg.Blocklist.FetchInterval.Duration(), regen) })
+	}
+
+	if err := g.Wait(); err != nil {
+		log.Error().Err(err).Msg("server error")
+		os.Exit(1)
+	}
+
+	log.Info().Msg("shutdown complete")
+}
+
+func collectAuthZones(cfg *config.Config, store interface{ ListZones(context.Context) ([]*dns.Zone, error) }) []string {
+	var zones []string
+	seen := make(map[string]bool)
+	for _, z := range cfg.CoreDNS.Zones {
+		if z.Type == "authoritative" && (z.Backend == "postgresql" || z.Backend == "") && z.Domain != "" && !seen[z.Domain] {
+			zones = append(zones, z.Domain)
+			seen[z.Domain] = true
+		}
+	}
+	if store != nil {
+		if list, err := store.ListZones(context.Background()); err == nil {
+			for _, z := range list {
+				if z != nil && z.Domain != "" && !seen[z.Domain] {
+					zones = append(zones, z.Domain)
+					seen[z.Domain] = true
+				}
+			}
+		}
+	}
+	return zones
+}

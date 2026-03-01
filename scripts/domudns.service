@@ -1,0 +1,37 @@
+[Unit]
+Description=DomU DNS
+Documentation=https://github.com/maik/domudns
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+
+# Secrets aus externer Datei laden (nicht im Repository!)
+# Enthält: DOMUDNS_SYNC_SECRET, DOMUDNS_CLUSTER_ROLE, etc.
+EnvironmentFile=/etc/domudns/env
+
+# Binary und Config
+ExecStart=/usr/local/bin/domudns -config /etc/domudns/config.yaml
+
+# Restart bei Fehlern
+Restart=on-failure
+RestartSec=5s
+
+# Limits (wichtig für Raspberry Pi)
+LimitNOFILE=65536
+LimitNPROC=512
+
+# Sicherheit
+NoNewPrivileges=true
+PrivateTmp=true
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=domudns
+
+[Install]
+WantedBy=multi-user.target
