@@ -1,0 +1,23 @@
+.git
+.gitignore
+*.md
+.env*
+coverage.out
+*.prof
+build/
+.cursor
+*.test
+
+# Dashboard Build-Artefakte
+dashboard/node_modules/
+dashboard/.next/
+dashboard/out/
+
+# embed.FS-Verzeichnis (wird im Docker-Build neu befüllt)
+internal/caddy/web/
+
+# Tests und Docs
+test/
+docs/
+scripts/
+**/*_test.go

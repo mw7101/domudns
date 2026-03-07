@@ -1,0 +1,51 @@
+groups:
+  - name: domudns
+    interval: 30s
+    rules:
+
+      # Node nicht erreichbar
+      - alert: DNSStackNodeDown
+        expr: up{job="domudns"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "DNS Stack Node {{ $labels.node }} nicht erreichbar"
+          description: "Prometheus kann {{ $labels.instance }} seit mehr als 1 Minute nicht scrapen."
+
+      # Hohe Fehlerrate (Forward-Fehler)
+      - alert: DNSHighErrorRate
+        expr: |
+          rate(dns_queries_total{result="error"}[5m]) /
+          rate(dns_queries_total[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Hohe DNS-Fehlerrate auf {{ $labels.node }}"
+          description: "Mehr als 5% der DNS-Anfragen schlagen fehl ({{ $value | humanizePercentage }})."
+
+      # Upstream-Latenz zu hoch (p95 > 500ms)
+      - alert: DNSHighUpstreamLatency
+        expr: |
+          histogram_quantile(0.95,
+            rate(dns_query_duration_seconds_bucket{result="forwarded"}[5m])
+          ) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Hohe Upstream-Latenz auf {{ $labels.node }}"
+          description: "p95 Upstream-Latenz liegt bei {{ $value | humanizeDuration }} (Schwellwert: 500ms)."
+
+      # Blocklist blockiert ungewöhnlich wenig (möglicherweise nicht geladen)
+      - alert: DNSBlocklistInactive
+        expr: |
+          rate(dns_queries_total{result="blocked"}[15m]) == 0
+          and rate(dns_queries_total[15m]) > 1
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Blocklist inaktiv auf {{ $labels.node }}"
+          description: "Keine blockierten Domains in den letzten 15 Minuten, obwohl Queries aktiv sind."

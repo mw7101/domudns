@@ -1,0 +1,25 @@
+services:
+  domudns:
+    image: domudns:latest
+    container_name: domudns
+    build:
+      context: .
+      args:
+        VERSION: ${VERSION:-dev}
+    restart: unless-stopped
+    ports:
+      - "53:53/udp"
+      - "53:53/tcp"
+      - "80:80/tcp"
+      - "9090:9090/tcp"
+    volumes:
+      - domudns-data:/var/lib/domudns/data
+      - ./configs/config.yaml:/etc/domudns/config.yaml:ro
+    environment:
+      - DOMUDNS_SYNC_SECRET=${DOMUDNS_SYNC_SECRET:-}
+      - DOMUDNS_CLUSTER_ROLE=${DOMUDNS_CLUSTER_ROLE:-}
+      - DOMUDNS_CLUSTER_MASTER_URL=${DOMUDNS_CLUSTER_MASTER_URL:-}
+      - DOMUDNS_CLUSTER_SLAVES=${DOMUDNS_CLUSTER_SLAVES:-}
+
+volumes:
+  domudns-data:

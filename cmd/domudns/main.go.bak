@@ -1,0 +1,102 @@
+package main
+
+import (
+	"context"
+	"flag"
+	"fmt"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/maik/lightweight-dns-stack/internal/caddy"
+	"github.com/maik/lightweight-dns-stack/internal/config"
+	"github.com/maik/lightweight-dns-stack/internal/coredns"
+	"github.com/maik/lightweight-dns-stack/internal/etcd"
+	"github.com/maik/lightweight-dns-stack/pkg/logger"
+	"github.com/rs/zerolog/log"
+	"golang.org/x/sync/errgroup"
+)
+
+var (
+	Version   = "dev"
+	BuildTime = "unknown"
+)
+
+func main() {
+	configPath := flag.String("config", "configs/config.yaml", "Path to configuration file")
+	flag.Parse()
+
+	cfg, err := config.Load(*configPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
+		os.Exit(1)
+	}
+
+	logger.Init(logger.Config{
+		Level:  cfg.System.LogLevel,
+		Format: cfg.System.LogFormat,
+	})
+
+	log.Info().
+		Str("version", Version).
+		Str("build_time", BuildTime).
+		Msg("starting lightweight dns stack")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		sig := <-sigCh
+		log.Info().Str("signal", sig.String()).Msg("received shutdown signal")
+		cancel()
+	}()
+
+	etcdEndpoints := []string{cfg.Etcd.ListenClient}
+	etcdClient, err := etcd.NewClient(
+		etcdEndpoints,
+		cfg.Etcd.Timeouts.Dial.Duration(),
+		cfg.Etcd.Timeouts.Request.Duration(),
+	)
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to connect to etcd")
+	}
+	defer etcdClient.Close()
+
+	zoneProvider := coredns.NewCachingZoneProvider(
+		coredns.NewEtcdZoneProvider(etcdClient, &cfg.CoreDNS),
+		30*time.Second,
+		cfg.CoreDNS.Cache.MaxZoneCache,
+	)
+	acmeProvider := coredns.NewEtcdACMEProvider(etcdClient)
+
+	dnsServer := coredns.NewServer(&cfg.CoreDNS, zoneProvider, acmeProvider)
+	if err := dnsServer.Start(ctx); err != nil {
+		log.Fatal().Err(err).Msg("failed to start DNS server")
+	}
+	defer func() {
+		shutdownCtx, sh := context.WithTimeout(context.Background(), 5*time.Second)
+		defer sh()
+		if err := dnsServer.Shutdown(shutdownCtx); err != nil { log.Debug().Err(err).Msg("DNS server shutdown") }
+	}()
+
+	httpServer := caddy.NewServer(cfg, etcdClient)
+
+	g, gctx := errgroup.WithContext(ctx)
+	g.Go(func() error {
+		if err := httpServer.Start(gctx); err != nil && err != http.ErrServerClosed {
+			return err
+		}
+		return nil
+	})
+
+	if err := g.Wait(); err != nil {
+		log.Error().Err(err).Msg("server error")
+		os.Exit(1)
+	}
+
+	log.Info().Msg("shutdown complete")
+}
