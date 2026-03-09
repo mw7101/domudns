@@ -1,0 +1,40 @@
+# Dependencies
+vendor/
+node_modules/
+
+# Build artifacts
+*.o
+*.a
+*.so
+*.exe
+dns-stack
+cli
+
+# Test artifacts
+*.test
+coverage.out
+*.prof
+
+# Temporary files
+*.tmp
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs
+*.log
+
+# IDE
+.vscode/
+.idea/
+
+# Documentation (if extensive)
+docs/images/
+docs/archive/
+
+# etcd data
+/var/lib/dns-stack/
+
+# Git
+.git/

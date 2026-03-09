@@ -1,0 +1,71 @@
+# Development config - uses port 8081 for HTTP (no root required)
+# PostgreSQL must be running: docker run -d -p 5432:5432 -e POSTGRES_PASSWORD=dnsstack -e POSTGRES_DB=dnsstack postgres:16-alpine
+
+coredns:
+  listen: "0.0.0.0:53"
+  spawn: true   # Dev: dns-stack starts CoreDNS as subprocess
+  conf_dir: "./tmp"   # user-writable, avoids /tmp permission issues after sudo
+  zones:
+    # Recursive: forward all non-authoritative queries
+    # Authoritative zones come from the backend (created via API)
+    - domain: "."
+      type: "recursive"
+      forward: ["1.1.1.1", "8.8.8.8"]
+  cache:
+    enabled: true
+    size: 1000
+    ttl: 300
+    max_zone_cache: 1000
+
+caddy:
+  listen: "0.0.0.0:8081"
+  admin_listen: "127.0.0.1:2019"
+  email: "admin@example.com"
+  web_ui:
+    enabled: true
+  api:
+    trust_proxy: true   # when behind reverse proxy
+  # tls:
+  #   cert_file: "/path/to/fullchain.pem"
+  #   key_file: "/path/to/privkey.pem"
+
+storage:
+  backend: "postgresql"
+
+etcd:
+  endpoints:
+    - "http://localhost:2379"
+  path: "/skydns"
+
+postgres:
+  dsn: "host=localhost port=5432 user=postgres password=dnsstack dbname=dnsstack sslmode=disable"
+
+acme:
+  dns_provider: "internal"
+  challenge_ttl: 300
+
+blocklist:
+  enabled: true
+  file_path: "./tmp/dns-stack-blocklist.hosts"   # same dir as Corefile, avoids /tmp permission issues
+  fetch_interval: "24h"
+
+# DHCP-Lease-Sync (Dev: deaktiviert)
+# dhcp_lease_sync:
+#   enabled: false
+#   source: "dnsmasq"
+#   source_path: "/tmp/dnsmasq.leases"
+#   zone: "home.lan"
+#   poll_interval: "10s"
+#   auto_create_zone: true
+
+system:
+  log_level: "debug"
+  log_format: "text"
+  security:
+    dnssec: false   # disabled in dev (upstream may be unreachable)
+  auth:
+    api_key: "YOUR_API_KEY_HERE"
+  query_log:
+    enabled: true
+    memory_entries: 1000
+    persist: false

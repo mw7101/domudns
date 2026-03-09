@@ -1,0 +1,215 @@
+# DomU DNS Configuration
+# Storage: JSON files on filesystem (no PostgreSQL, no etcd)
+
+# Custom DNS Server Settings
+dnsserver:
+  # Listen address for DNS queries (IPv4 and IPv6 dual-stack)
+  listen: "[::]:53"
+
+  # Upstream DNS servers for recursive queries
+  upstream:
+    - "1.1.1.1"
+    - "8.8.8.8"
+
+  # DNS Cache settings
+  cache:
+    enabled: true
+    max_entries: 10000
+    default_ttl: 3600
+    negative_ttl: 300
+
+  # Conditional Forwarding: route specific domains to dedicated DNS servers.
+  # Typical use case: FritzBox domains (fritz.box, mydevice.fritz.box) to the router.
+  # Rules are applied by longest match (most specific domain wins).
+  # conditional_forwards:
+  #   - domain: "fritz.box"
+  #     servers:
+  #       - "192.168.178.1"
+  #   - domain: "corp.internal"
+  #     servers:
+  #       - "10.0.0.1"
+  #       - "10.0.0.2"
+
+  # DNS over HTTPS (DoH) — RFC 8484
+  # Enables encrypted DNS queries via HTTPS.
+  # Compatible with Firefox, Chrome, Stubby, dnscrypt-proxy.
+  # Endpunkt: GET/POST http(s)://<host>/dns-query
+  doh:
+    enabled: false          # true = DoH aktivieren
+    path: "/dns-query"      # HTTP-Pfad (RFC 8484 Standard)
+
+  # DNS over TLS (DoT, RFC 7858) — encrypts DNS queries over TCP port 853.
+  # Compatible with Android 9+, iOS 14+, Stubby, systemd-resolved.
+  # TLS certificate required. Empty = use caddy.tls.cert_file/key_file.
+  dot:
+    enabled: false          # true = enable DoT (restart required)
+    listen: "[::]:853"      # IPv4+IPv6 dual-stack on port 853
+    # cert_file: ""         # empty = use caddy.tls.cert_file
+    # key_file: ""          # empty = use caddy.tls.key_file
+
+  # Performance tuning
+  udp_size: 4096
+  tcp_timeout: 5s
+
+# Caddy Web Server Settings
+caddy:
+  # Listen address: port 80 for HTTP (no TLS), port 443 for HTTPS (with TLS certificates)
+  listen: "0.0.0.0:80"
+
+  # Admin API (local only)
+  admin_listen: "127.0.0.1:2019"
+
+  # ACME/Let's Encrypt
+  email: "admin@example.com"
+  acme:
+    provider: "letsencrypt"
+    staging: false  # Set to true for testing
+    challenge: "dns-01"
+
+  # Web UI
+  web_ui:
+    enabled: true
+    path: "/var/lib/domudns/ui"
+
+  # API
+  api:
+    enabled: true
+    base_path: "/api"
+    # trust_proxy: true  # ONLY when behind trusted reverse proxy! See docs/deployment.md
+    # CORS: leave empty for "*" (allow all). For production, list allowed origins:
+    # cors_allowed_origins:
+    #   - "https://dns-admin.example.com"
+
+  # TLS (enable HTTPS when cert_file and key_file are set)
+  tls:
+    protocols:
+      - "tls1.2"
+      - "tls1.3"
+    # cert_file: "/etc/letsencrypt/live/example.com/fullchain.pem"
+    # key_file: "/etc/letsencrypt/live/example.com/privkey.pem"
+
+# Cluster configuration (Master/Slave via HTTP push + poll fallback)
+# Sync secret is set via DOMUDNS_SYNC_SECRET env var
+cluster:
+  # Role: "master" (default, also for standalone) or "slave"
+  role: "master"
+  # Data directory for JSON files
+  data_dir: "/var/lib/domudns/data"
+  # Slave URLs (master only): all slave nodes
+  # slaves:
+  #   - "http://192.0.2.2:80"
+  # Master URL (slave only)
+  # master_url: "http://192.0.2.1:80"
+  # Timeout for push requests to slaves
+  push_timeout: "5s"
+  # How often slaves poll the master (fallback if push is lost)
+  poll_interval: "30s"
+
+# ACME DNS-01 Plugin Settings
+acme:
+  # DNS provider (always "internal" for this server)
+  dns_provider: "internal"
+  # DNS propagation timeout
+  propagation_timeout: 120  # seconds
+  # Polling interval for checking DNS propagation
+  polling_interval: 2  # seconds
+  # TTL for ACME challenge TXT records
+  challenge_ttl: 300  # seconds (5 min, Let's Encrypt may take up to 60–90s to verify)
+
+# Blocklist (Ad/Malware blocking, Whitelist)
+blocklist:
+  enabled: true
+  file_path: "/var/lib/domudns/blocklist.hosts"
+  fetch_interval: "24h"
+  # block_ip4: "0.0.0.0"   # default (only relevant when block_mode: zero_ip)
+  # block_ip6: "::"         # default (only relevant when block_mode: zero_ip)
+  # Response type for blocked domains (live-reload via PATCH /api/config):
+  #   "zero_ip"  — return 0.0.0.0 / :: (default, legacy behavior)
+  #   "nxdomain" — return NXDOMAIN (recommended: browser aborts immediately)
+  block_mode: "zero_ip"
+  # Default blocklist URLs: automatically added on first start (master/standalone only),
+  # when no URLs have been configured via the web UI yet.
+  default_urls:
+    - "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts"
+
+# System Settings
+system:
+  # Logging
+  log_level: "info"  # debug, info, warn, error
+  log_format: "json"  # json or text
+
+  # Metrics — Prometheus scraping on port 9090
+  # No auth required, restrict firewall access to trusted IPs
+  metrics:
+    enabled: true
+    listen: "0.0.0.0:9090"
+
+  # Rate Limiting
+  rate_limit:
+    enabled: true
+    # Requests per minute per IP
+    dns_queries: 1000
+    api_requests: 100
+
+  # Security
+  security:
+    # DNSSEC AD-flag delegation (stub resolver mode, RFC 4035).
+    # Sets DO-bit on upstream requests → upstream (1.1.1.1, 8.8.8.8) validates DNSSEC.
+    # Propagates AD-bit to clients: AD=1 means response is DNSSEC-validated.
+    # Protects against DNS spoofing. No own crypto overhead.
+    dnssec: true
+    # Block DNS amplification attacks
+    block_amplification: true
+    # DNS Rebinding Protection (opt-in, default: false)
+    # Blocks upstream responses that resolve external domains to private/RFC1918 IPs.
+    # Protects against browser-based attacks on home routers (e.g. evil.com → 192.168.1.1).
+    # Note: Add all conditional_forwards domains and local split-DNS domains
+    # to rebinding_protection_whitelist!
+    rebinding_protection: false
+    # rebinding_protection_whitelist:
+    #   - "fritz.box"
+    #   - "corp.internal"
+
+  # Query-Log: log all DNS queries (in-memory + optional SQLite)
+  query_log:
+    enabled: true
+    # In-memory ring buffer: max entries (~600 bytes/entry, 5000 ≈ 3 MB RAM)
+    memory_entries: 5000
+    # SQLite persistence: SD-card friendly (WAL, batch commits)
+    # Default: off — no disk write without persist: true
+    persist: false
+    # persist_path: ""       # Default: <data_dir>/query.log.db
+    # persist_days: 7        # Retention: entries older than N days are deleted
+    # push_interval: "30s"   # Slave → Master Batch-Push-Intervall
+
+# DHCP-Lease-Sync: automatic A and PTR records from DHCP leases
+# Supported sources: dnsmasq, ISC dhcpd, FritzBox (TR-064)
+# Active on master/standalone only — slaves receive records via cluster sync.
+# dhcp_lease_sync:
+#   enabled: false
+#   source: "dnsmasq"                           # "dnsmasq", "dhcpd", "fritzbox"
+#   source_path: "/var/lib/misc/dnsmasq.leases" # path to lease file
+#   zone: "home.lan"                            # forward zone for A records
+#   reverse_zone: ""                            # reverse zone (empty = auto from IP)
+#   ttl: 60                                     # TTL for DHCP records (seconds)
+#   poll_interval: "30s"                        # poll interval
+#   auto_create_zone: true                      # create zones automatically
+#   # FritzBox-specific:
+#   # fritzbox_url: "http://192.168.178.1:49000"
+#   # fritzbox_user: "admin"
+#   # Password via: DOMUDNS_FRITZBOX_PASSWORD in /etc/domudns/env
+
+# Performance Tuning
+performance:
+  # DNS query timeout
+  dns_timeout: 2s
+  # API request timeout
+  api_timeout: 30s
+
+# Development Settings (remove in production)
+development:
+  # Enable debug endpoints
+  debug: false
+  # Enable pprof profiling
+  pprof: false
+  pprof_listen: "127.0.0.1:6060"

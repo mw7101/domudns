@@ -1,0 +1,24 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: domudns
+
+rule_files:
+  - alert_rules.yml
+
+scrape_configs:
+  # DNS Stack — 2 Nodes (dns1 + dns2)
+  - job_name: domudns
+    static_configs:
+      - targets:
+          - 192.0.2.1:9090
+          - 192.0.2.2:9090
+        labels:
+          cluster: domudns
+    relabel_configs:
+      # Node-Label aus der IP ableiten (z.B. "dns-node-1")
+      - source_labels: [__address__]
+        regex: '192\.168\.100\.(\d+):\d+'
+        replacement: 'rasp-3b-0${1}'
+        target_label: node

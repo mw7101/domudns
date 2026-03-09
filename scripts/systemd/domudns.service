@@ -1,0 +1,25 @@
+[Unit]
+Description=DomU DNS
+Documentation=https://github.com/maik/domudns
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/domudns -config /etc/domudns/config.yaml
+Restart=on-failure
+RestartSec=5
+User=root
+Group=root
+
+# Security
+NoNewPrivileges=true
+PrivateTmp=true
+
+# Resource limits
+LimitNOFILE=65536
+
+# Environment
+Environment="LOG_LEVEL=info"
+
+[Install]
+WantedBy=multi-user.target
