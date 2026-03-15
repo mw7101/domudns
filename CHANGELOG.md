@@ -2,6 +2,22 @@
 
 All notable changes to DomU DNS will be documented in this file.
 
+## [v0.1.3]
+
+### 2026-03-14
+
+#### Fixed
+- **Functional test script** (`scripts/test_functional.sh`): Fixed multiple correctness bugs found during live testing:
+  - Record TTL validation: changed all record TTLs from 60 to 300 (server rejects TTL < 300)
+  - HTTP status codes: all DELETE endpoints return 204 (not 200) — fixed `expect_status` calls to `expect_status_any "200" "204"`
+  - HTTP status codes: record/zone POST returns 201 (Created) — fixed to accept `"200" "201"`
+  - Record ID type: record IDs are `int` not string — replaced `grep '"id":"..."'` with `grep '"id":[0-9]*'` via new `extract_id()` / `extract_all_ids()` helpers
+  - `expect_status` / `expect_status_any` no longer `return 1` (avoided spurious failures in shell scripts without `set -e`)
+  - Health check added explicit `exit 1` guard when server is unreachable
+
+#### Changed
+- **Functional test script** (`scripts/test_functional.sh`): Extended with comprehensive coverage of all API endpoints. New sections: Session-Auth login/logout (2b), auth management with password-change validation (3b), blocklist URL fetch trigger (8b), block-mode switching NXDOMAIN/zero_ip with DNS verification (8c), DDNS status endpoint (9b), Split-Horizon zone CRUD with `?view=` parameter (10b), DoH path corrected to `/dns-query` with valid wire-format query, DoT connectivity smoke-test via openssl (12b), query-log with filters and stats (14b), DHCP leases and status (14c), metrics history for 24h/7d/30d ranges and HEAD request (14d), rebinding protection documentation (14e). New env vars: `DNS_ADMIN_USER`, `DNS_ADMIN_PASS`, `DNS_TEST_REGEN`. New helpers: `api_head()`, `expect_status_any()`, `dns_rcode()`, `extract_id()`, `extract_all_ids()`, `extract_str_id()`.
+
 ## [v0.1.2]
 
 ### 2026-03-08

@@ -99,7 +99,7 @@ func (p *FritzBoxParser) getHostCount(ctx context.Context) (int, error) {
 		return 0, err
 	}
 
-		// Response is nested inside SOAP body
+	// Response is nested inside SOAP body
 	var env soapResponse
 	if err := xml.Unmarshal(respBody, &env); err != nil {
 		return 0, fmt.Errorf("fritzbox: XML parse: %w", err)

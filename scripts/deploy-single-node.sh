@@ -207,21 +207,28 @@ if [ $SSH_EXIT -ne 0 ]; then
   exit 1
 fi
 
-# 3. Health Check
+# 3. Health Check — Retry-Schleife bis zu 30s (Server-Start inkl. Cache-Warmup dauert ~10s)
 echo "Health Check..."
-sleep 5
-
 HEALTH_URL=""
-if curl -f -s -o /dev/null -w "%{http_code}" --max-time 5 https://${PI_HOST}:443/api/health 2>/dev/null | grep -q "200"; then
-  HEALTH_URL="https://${PI_HOST}:443/api/health"
-elif curl -f -s -o /dev/null -w "%{http_code}" --max-time 5 http://${PI_HOST}:80/api/health 2>/dev/null | grep -q "200"; then
-  HEALTH_URL="http://${PI_HOST}:80/api/health"
-fi
+HEALTH_MAX=15
+i=0
+while [ $i -lt $HEALTH_MAX ]; do
+  if curl -f -s -o /dev/null -w "%{http_code}" --max-time 5 https://${PI_HOST}:443/api/health 2>/dev/null | grep -q "200"; then
+    HEALTH_URL="https://${PI_HOST}:443/api/health"
+    break
+  elif curl -f -s -o /dev/null -w "%{http_code}" --max-time 5 http://${PI_HOST}:80/api/health 2>/dev/null | grep -q "200"; then
+    HEALTH_URL="http://${PI_HOST}:80/api/health"
+    break
+  fi
+  i=$((i + 1))
+  echo "  Warte auf HTTP-Server... ($i/$HEALTH_MAX)"
+  sleep 2
+done
 
 if [ -n "${HEALTH_URL}" ]; then
   echo "Health Check erfolgreich: ${HEALTH_URL}"
 else
-  echo "Health Check fehlgeschlagen (weder Port 443 noch Port 80 erreichbar)!"
+  echo "Health Check fehlgeschlagen nach $((HEALTH_MAX * 2))s (weder Port 443 noch Port 80 erreichbar)!"
   ssh ${PI_USER}@${PI_HOST} "sudo systemctl status ${SERVICE_NAME} --no-pager" || true
   exit 1
 fi

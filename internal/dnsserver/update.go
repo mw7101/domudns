@@ -22,11 +22,11 @@ type DDNSStore interface {
 
 // DDNSStats enthält laufende Statistiken des DDNS-Handlers.
 type DDNSStats struct {
-	TotalUpdates  int64
-	LastUpdateAt  time.Time
-	TotalFailed   int64
-	LastError     string
-	LastErrorAt   time.Time
+	TotalUpdates int64
+	LastUpdateAt time.Time
+	TotalFailed  int64
+	LastError    string
+	LastErrorAt  time.Time
 	// LastRejectedReason gibt den Grund der letzten Ablehnung an (z.B. "NOTZONE: example.local", "NOTAUTH").
 	LastRejectedReason string
 	LastRejectedAt     time.Time

@@ -1,185 +1,217 @@
 # DomU DNS
 
-A resource-efficient, full-featured DNS server stack in Go for Raspberry Pi 3B (1 GB RAM).
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Go](https://img.shields.io/badge/Go-1.24-00ADD8.svg)](https://golang.org)
+[![Platform](https://img.shields.io/badge/Platform-ARMv7%20%7C%20ARM64%20%7C%20AMD64-orange.svg)](#)
+[![RAM](https://img.shields.io/badge/RAM-%7E25%20MB-brightgreen.svg)](#performance)
+[![Domains Blocked](https://img.shields.io/badge/Blocked-220k%2B%20domains-red.svg)](#)
+
+**A lightweight, privacy-first DNS server for Raspberry Pi 3B** — ad blocking, authoritative zones, RFC 2136 DDNS, Split-Horizon, Let's Encrypt DNS-01, and Master/Slave clustering in a single Go binary using ~25 MB RAM.
+
+> **Website & Docs:** [domudns.net](https://domudns.net)
+
+---
+
+## Why DomU DNS?
+
+Every existing DNS solution was either too heavy for a Raspberry Pi 3B or lacked features needed for a proper homelab:
+
+| Feature | DomU DNS | Pi-hole | AdGuard Home | Technitium |
+|---|:---:|:---:|:---:|:---:|
+| **RAM on Pi 3B** | **~25 MB** | 80–160 MB | 50–130 MB | 200 MB+ |
+| Ad blocking (220k+ domains) | ✅ | ✅ | ✅ | ✅ |
+| Authoritative DNS zones | ✅ | ❌ | ❌ | ✅ |
+| RFC 2136 DDNS (TSIG) | ✅ | ❌ | ❌ | ✅ |
+| Split-Horizon DNS | ✅ | ❌ | ❌ | Partial |
+| Zone Transfer AXFR/IXFR | ✅ | ❌ | ❌ | ✅ |
+| Master/Slave Cluster | ✅ | ❌ | ❌ | ✅ |
+| DoH + DoT | ✅ | Partial | ✅ | ✅ |
+| Let's Encrypt DNS-01 | ✅ | ❌ | ❌ | Partial |
+| DNSSEC signing | ✅ | ❌ | ❌ | ✅ |
+| LRU Cache + Warming | ✅ | ❌ | ❌ | ❌ |
+| No database required | ✅ | ❌ | ✅ | ✅ |
+| Runtime | **Go binary** | C/FTL+dnsmasq | Go | .NET runtime |
+
+---
 
 ## Features
 
-- ✅ **Custom DNS Server:** High-performance DNS server using `github.com/miekg/dns`
-- ✅ **Blocklist with Whitelist:** 220k+ blocked domains, client-IP-based whitelist
-- ✅ **Wildcard & Regex Blocking:** Pattern-based blocking (`*.ads.com`, `/^tracker[0-9]+/`)
-- ✅ **Block Response Mode:** `zero_ip` (0.0.0.0) or `nxdomain` — switchable live
-- ✅ **Default Blocklist URLs:** Automatically pre-populated on first installation (StevenBlack Hosts)
-- ✅ **Authoritative Zones:** DNS zones from local file backend with 0ms response time
-- ✅ **FWD Record:** Internal record type for zone-internal fallback forwarding (NXDOMAIN → external DNS)
-- ✅ **Conditional Forwarding:** Domain-specific forwarding rules (e.g. `fritz.box` → FritzBox)
-- ✅ **Zone Auto-Reload:** Zones are immediately updated in the DNS server after API changes
-- ✅ **Config Live-Reload:** Change upstream DNS, conditional forwards, block mode and log level without service restart
-- ✅ **PTR Records:** Full validation for reverse DNS (in-addr.arpa, ip6.arpa)
-- ✅ **Response Cache:** In-memory LRU cache with TTL expiration and **Cache Warming** (preloads popular domains at startup)
-- ✅ **Query Log:** Searchable log of all DNS queries (in-memory + SQLite, slave push)
-- ✅ **DNS over HTTPS (DoH):** RFC 8484 compliant DoH endpoint (GET + POST, no auth)
-- ✅ **DNS over TLS (DoT):** RFC 7858 compliant DoT listener (TCP port 853, TLS certificate required)
-- ✅ **DNSSEC Support:** AD-flag delegation (stub resolver mode, RFC 4035) — set DO bit, propagate AD bit, filter DNSSEC RRs
-- ✅ **RFC 2136 DDNS:** DNS UPDATE via TSIG authentication — ISC dhcpd sends lease updates directly as DNS UPDATE (no external script)
-- ✅ **DHCP Lease Sync:** Automatic A/PTR records from DHCP leases (dnsmasq/FritzBox), dashboard at `/api/dhcp/leases`
-- ✅ **TTL Override per Zone:** Normalizes all DNS response TTLs of a zone to a configured value (except SOA) — ideal for Windows clients
-- ✅ **DNS Rebinding Protection:** Blocks upstream responses that resolve public domains to private IPs (RFC1918/loopback)
-- ✅ **Prometheus Metrics:** Queries, latency, cache rate on port 9090
-- ✅ **Let's Encrypt:** Automatic TLS certificates via DNS-01 challenge
-- ✅ **Next.js Dashboard:** Modern management interface (TypeScript, Tailwind, Recharts)
-- ✅ **DB Auth:** User authentication (bcrypt, sessions, API key) in local file backend
-- ✅ **Setup Wizard:** Guided initial setup on first login
-- ✅ **REST API:** Full API for all DNS operations
-- ✅ **Master/Slave Cluster:** File-based clustering with HTTP push/pull — no external backend required
-- ✅ **Ultra Low RAM:** ~25 MB for DNS server + blocklist + cache
+- 🛡️ **Ad & Tracker Blocking** — 220k+ domains, O(1) lookup, wildcard/regex support
+- 🌐 **Authoritative DNS Zones** — A, AAAA, MX, CNAME, PTR, TXT, SRV, CAA, NS; JSON file backend
+- 🔄 **RFC 2136 DDNS** — ISC dhcpd / Kea DHCP integration via TSIG; auto PTR records
+- 🔀 **Split-Horizon DNS** — different answers for internal vs. external clients
+- 🔗 **Master/Slave Cluster** — HMAC-SHA256, atomic JSON writes, no database
+- 🔒 **DoH + DoT** — RFC 8484 / RFC 7858 with your own certificates
+- 🔐 **Let's Encrypt DNS-01** — built-in ACME provider; Traefik httpreq, Certbot plugin, acme.sh/Proxmox
+- 🚫 **DNS Rebinding Protection** — blocks external domains resolving to private IPs
+- ⚡ **LRU Cache + Warming** — preloads top-N query-log domains at startup
+- 📊 **Next.js Dashboard** — real-time stats, zone management, query log, cluster status
+- 🔁 **Zone Transfer AXFR/IXFR** — ACL-protected, TCP-only
+- 📡 **DHCP Lease Sync** — dnsmasq / FritzBox lease files → DNS records
+- 🔑 **Named API Keys** — per-service API keys with revocation
+- 📈 **Prometheus Metrics** — queries, latency, cache hit rate
+- ⚙️ **Live Config Reload** — upstream DNS, block mode, log level without restart
+
+---
 
 ## Performance
 
 | Metric | Value |
 |--------|-------|
-| **RAM Usage** | ~25 MB (DNS server + blocklist + cache) |
-| **Response Time (Cache)** | 0 ms |
-| **Response Time (Authoritative)** | 0 ms |
-| **Response Time (Upstream)** | 1-8 ms |
-| **Blocklist Size** | 220,000+ domains |
-| **Blocklist Lookup** | O(1) - hash map |
-| **Cache Size** | 10,000 entries (~5 MB) |
+| RAM on Raspberry Pi 3B | ~25 MB |
+| Blocklist size | 220,000+ domains |
+| Blocklist lookup | O(1) — hash map |
+| Response time (cache hit) | 0 ms |
+| Response time (authoritative) | 0 ms |
+| Response time (upstream) | 1–8 ms |
+| Cache capacity | 10,000 entries (~5 MB) |
 
-**Target Platform:** Raspberry Pi 3B (ARMv7, 1GB RAM)
-
-## Components
-
-| Component | Function | Port |
-|-----------|----------|------|
-| **DNS Server** | Custom Go DNS server (UDP/TCP) | 53 |
-| **HTTP Server** | Web UI + REST API | 80 / 443 |
-| **Metrics Server** | Prometheus metrics (no auth) | 9090 |
-| **File Backend** | Local JSON files, no external DB required | — |
-
-## Operating Modes
-
-| Mode | Description | Configuration |
-|------|-------------|---------------|
-| **Standalone** | A single Pi, no cluster | `cluster.role: "master"`, no `slaves:` |
-| **Master** | Leading node, propagates to slaves | `cluster.role: "master"` + `slaves: [...]` |
-| **Slave** | Receives data from master, read-only API | `cluster.role: "slave"` + `master_url: ...` |
-
-**Standalone is the default** — no `DOMUDNS_SYNC_SECRET`, no cluster overhead, full functionality on a single Pi.
+---
 
 ## Quick Start
 
+```bash
+# 1. Clone & build for Raspberry Pi 3B (ARMv7)
+git clone https://github.com/mw7101/domudns.git
+cd domudns && make build-arm
+
+# 2. Copy to Pi
+scp build/domudns-arm pi@<PI_IP>:/usr/local/bin/domudns
+
+# 3. Install service & start
+scp scripts/domudns.service pi@<PI_IP>:/tmp/
+ssh pi@<PI_IP> "sudo mv /tmp/domudns.service /etc/systemd/system/ && sudo systemctl enable --now domudns"
+
+# 4. Open setup wizard
+open http://<PI_IP>/setup
+```
+
+> **No database required.** All data is stored as JSON files under `/var/lib/domudns/data/`.
+> **Full docs:** [domudns.net/docs/quickstart.html](https://domudns.net/docs/quickstart.html)
+
+---
+
+## Installation
+
 ### Prerequisites
 
-- Go 1.24+
-- Raspberry Pi 3B with Debian/Raspbian (or compatible)
-- Root access for port 53
+- Go 1.24+ (build machine only)
+- Raspberry Pi 3B with Debian Bookworm/Raspbian — or any Linux AMD64/ARM64/ARMv7
+- SSH access to the target host
+- Port 53 free (stop `systemd-resolved` if needed)
 
-### Installation
+### Step 1 — Build
 
 ```bash
-# 1. Clone the repository
 git clone https://github.com/mw7101/domudns.git
 cd domudns
 
-# 2. Build binary for Raspberry Pi
+# Raspberry Pi 3B (ARMv7)
 make build-arm
 
-# 3. Test locally (requires sudo for port 53)
-sudo ./build/domudns -config configs/config.yaml
+# ARM64 (Pi 4/5, modern SBCs)
+make build-arm64
+
+# AMD64 (x86 server, NAS, VPS)
+make build
 ```
 
-### Deployment to Raspberry Pi
+### Step 2 — Install on target host
 
 ```bash
-# 1. Copy binary
-scp build/domudns-arm pi@dns-node-1:/tmp/
+# Create directories
+ssh pi@<PI_IP> "sudo mkdir -p /etc/domudns /var/lib/domudns/data /usr/local/bin"
 
-# 2. Install on the Raspberry Pi
-ssh pi@dns-node-1
-sudo systemctl stop domudns
-sudo cp /tmp/domudns-arm /usr/local/bin/domudns
-sudo chmod +x /usr/local/bin/domudns
-
-# 3. Copy configuration
-sudo mkdir -p /etc/domudns /var/lib/domudns/data
-sudo cp configs/config.yaml /etc/domudns/
-
-# 4. Install systemd service
-sudo cp scripts/domudns.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable domudns
-sudo systemctl start domudns
-
-# 5. Check status
-sudo systemctl status domudns
+# Copy binary
+scp build/domudns-arm pi@<PI_IP>:/tmp/domudns
+ssh pi@<PI_IP> "sudo mv /tmp/domudns /usr/local/bin/domudns && sudo chmod +x /usr/local/bin/domudns"
 ```
+
+### Step 3 — Minimal Configuration
+
+Create `/etc/domudns/config.yaml` on the host:
+
+```yaml
+cluster:
+  role: "master"
+  data_dir: "/var/lib/domudns/data"
+
+dnsserver:
+  listen: "[::]:53"
+  upstream:
+    - "9.9.9.9"           # Quad9
+    - "149.112.112.112"
+
+http:
+  listen: ":80"
+
+system:
+  log_level: "info"
+```
+
+### Step 4 — Start
+
+```bash
+scp scripts/domudns.service pi@<PI_IP>:/tmp/
+ssh pi@<PI_IP> "
+  sudo mv /tmp/domudns.service /etc/systemd/system/
+  sudo systemctl daemon-reload
+  sudo systemctl enable --now domudns
+"
+```
+
+### Step 5 — First-Time Setup
+
+Open `http://<PI_IP>/setup` in your browser. The wizard guides you through:
+1. Set admin username and password
+2. Generate a secure API key
+3. Configure blocklist sources
+4. Add your local DNS zones
+
+---
 
 ## Configuration
 
-Edit `/etc/domudns/config.yaml`:
+Full reference: [domudns.net/docs/config.html](https://domudns.net/docs/config.html)
 
 ```yaml
-# Cluster configuration
 cluster:
   role: "master"              # "master" | "slave"
   data_dir: "/var/lib/domudns/data"
-  # Slaves (master only):
   # slaves:
-  #   - "http://192.0.2.2:80"
-  # Master URL (slave only):
-  # master_url: "http://192.0.2.1:80"
-  push_timeout: "5s"
-  poll_interval: "30s"
+  #   - "http://<SLAVE_IP>:80"
 
-# DNS server configuration
 dnsserver:
-  listen: "[::]:53"              # IPv4+IPv6 dual-stack
+  listen: "[::]:53"
   upstream:
-    - "1.1.1.1"                  # Cloudflare
-    - "8.8.8.8"                  # Google DNS
+    - "9.9.9.9"
+    - "149.112.112.112"
   cache:
     enabled: true
-    max_entries: 10000           # ~5MB RAM
-    default_ttl: 3600            # 1 hour
-    negative_ttl: 300            # 5 minutes for NXDOMAIN
-    warmup_count: 200            # Domains to preload at startup (0 = disabled)
-  udp_size: 4096
-  tcp_timeout: 5s
-  # Conditional forwarding: route specific domains to specific DNS servers
-  # conditional_forwards:
-  #   - domain: "fritz.box"
-  #     servers: ["192.168.178.1"]
-  #   - domain: "corp.internal"
-  #     servers: ["10.0.0.1", "10.0.0.2"]
-  # DNS over HTTPS (RFC 8484) — browser compatibility
+    max_entries: 10000
+    warmup_count: 200         # Preload top domains from query log at startup
+  # DNS over HTTPS (RFC 8484)
   doh:
-    enabled: false               # true to enable
-    path: "/dns-query"           # RFC 8484 standard path
-  # DNS over TLS (RFC 7858) — Android 9+, iOS 14+, systemd-resolved
+    enabled: false
+    path: "/dns-query"
+  # DNS over TLS (RFC 7858)
   dot:
-    enabled: false               # true to enable (restart required)
-    listen: "[::]:853"           # IPv4+IPv6 dual-stack on port 853
-    # cert_file: ""              # empty = use caddy.tls.cert_file
-    # key_file: ""               # empty = use caddy.tls.key_file
+    enabled: false
+    listen: "[::]:853"
 
-# Blocklist configuration
 blocklist:
   enabled: true
   file_path: "/var/lib/domudns/blocklist.hosts"
-  fetch_interval: 24h            # Update daily
-  block_ip4: "0.0.0.0"           # IPv4 block response (zero_ip mode)
-  block_ip6: "::"                # IPv6 block response (zero_ip mode)
-  block_mode: "zero_ip"          # "zero_ip" (default) | "nxdomain" (faster for browsers)
-  default_urls:                  # Automatically populated on first installation
+  fetch_interval: 24h
+  block_mode: "zero_ip"       # "zero_ip" | "nxdomain"
+  default_urls:
     - "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts"
 
-# HTTP server
-caddy:
-  listen: "0.0.0.0:80"          # TLS: "0.0.0.0:443"
+http:
+  listen: "0.0.0.0:80"
 
-# System
 system:
-  log_level: info                # debug, info, warn, error
+  log_level: info
   metrics:
     enabled: true
     listen: "0.0.0.0:9090"
@@ -188,340 +220,149 @@ system:
 ### Environment Variables
 
 ```bash
-# Sync secret for cluster communication (HMAC-SHA256, same on all nodes)
+# Cluster sync secret (HMAC-SHA256, same on all nodes — required for clustering)
 export DOMUDNS_SYNC_SECRET="<64-hex-characters>"
-
-# Log level (optional, overrides config.yaml)
-export LOG_LEVEL="debug"
 ```
 
-**Note:** API key and password are set via the setup wizard — no environment variable required.
+---
 
-## Web UI
-
-After startup the web UI is available at:
-
-- **Production:** http://192.0.2.1 (or your configured IP)
-- **Development:** http://localhost:80
-
-**First login:** `admin` / `admin` → redirected to setup wizard → set password and API key.
-
-**API access:** `Authorization: Bearer <API-Key>` (visible in the web UI after the setup wizard).
-
-### Dashboard Features (Next.js)
-
-- ✅ Create and manage DNS zones
-- ✅ Add/edit/delete DNS records (A, AAAA, CNAME, MX, TXT, NS, SRV, PTR, CAA, **FWD**)
-- ✅ FWD record: name automatically `@`, comma-separated DNS servers
-- ✅ PTR records: full validation (reverse DNS for in-addr.arpa and ip6.arpa)
-- ✅ Manage blocklist URLs (including default URLs)
-- ✅ Wildcard/regex patterns for blocklist (e.g. `*.ads.com`, `/^tracker[0-9]+/`)
-- ✅ Block response mode: `zero_ip` or `nxdomain` — switchable live
-- ✅ Client IP whitelist for admins
-- ✅ DoH status and DoT status on overview page + configuration in settings
-- ✅ Adjust configuration via UI — **live reload** for upstream DNS, block mode and log level
-- ✅ Change password and API key via UI (Settings → Security)
-- ✅ Prometheus monitoring page with live metrics (query rate, latency, cache rate), time range **1h/24h/7d/30d** (default: 1h)
-- ✅ **Overview statistics:** Top clients, top domains, top blocks, QPS time series (Recharts)
-- ✅ **Query Log:** Searchable table of all DNS queries (live refresh 5s, filter by client/domain/result)
-- ✅ **Query Log action menu:** Add a blocked domain to the whitelist with one click
-- ✅ **DDNS page:** Create/delete TSIG keys, runtime stats (total updates, failures, last rejection), contextual diagnosis banners (NOTZONE, NOTAUTH), pre-filled ISC dhcpd config guide
-- ✅ **Zone TTL Override:** Optionally configurable per zone — normalizes all response TTLs (except SOA)
-
-## REST API Examples
-
-### Create a Zone
-
-```bash
-curl -X POST http://dns1.example.com/api/zones \
-  -H "Authorization: Bearer YOUR_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "domain": "example.com",
-    "ttl": 3600,
-    "ttl_override": 300,
-    "records": []
-  }'
-```
-
-`ttl_override` (optional, 0 = disabled): Normalizes all DNS response TTLs of this zone to the specified value (minimum 60s, maximum 604800s). SOA records are excluded.
-
-### Add an A Record
-
-```bash
-curl -X POST http://dns1.example.com/api/zones/example.com/records \
-  -H "Authorization: Bearer YOUR_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "www",
-    "type": "A",
-    "ttl": 3600,
-    "value": "192.0.2.1"
-  }'
-```
-
-### PTR Record for Reverse DNS
-
-```bash
-# Create reverse zone (for 192.168.100.x)
-curl -X POST http://dns1.example.com/api/zones \
-  -H "Authorization: Bearer YOUR_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"domain": "100.168.192.in-addr.arpa", "ttl": 3600}'
-
-# Add PTR record (192.0.2.1 → router.int.example.com)
-curl -X POST "http://dns1.example.com/api/zones/100.168.192.in-addr.arpa/records" \
-  -H "Authorization: Bearer YOUR_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"name": "1", "type": "PTR", "ttl": 3600, "value": "router.int.example.com"}'
-
-# Test reverse DNS
-dig -x 192.0.2.1 @192.0.2.1
-```
-
-### Update Config Live (no restart required)
-
-```bash
-# Switch upstream DNS
-curl -X PATCH http://dns1.example.com/api/config \
-  -H "Authorization: Bearer YOUR_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"dnsserver": {"upstream": ["9.9.9.9", "149.112.112.112"]}}'
-
-# Change log level
-curl -X PATCH http://dns1.example.com/api/config \
-  -H "Authorization: Bearer YOUR_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"system": {"log_level": "debug"}}'
-```
-
-### Add a Blocklist URL
-
-```bash
-curl -X POST http://dns1.example.com/api/blocklist/urls \
-  -H "Authorization: Bearer YOUR_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"url": "https://someonewhocares.org/hosts/hosts", "description": "Dan Pollock Hosts"}'
-```
-
-### Create a TSIG Key for DDNS
-
-```bash
-# Create a new TSIG key (secret is returned only once!)
-curl -X POST http://dns1.example.com/api/ddns/keys \
-  -H "Authorization: Bearer YOUR_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"name": "dhcp-key", "algorithm": "hmac-sha256"}'
-
-# List all TSIG keys
-curl -H "Authorization: Bearer YOUR_API_KEY" \
-  http://dns1.example.com/api/ddns/keys
-```
-
-## DNS Server Architecture
-
-The custom DNS server processes all DNS queries through a multi-stage pipeline:
-
-```
-Incoming DNS query (port 53)
-    ↓
-1. Extract client IP
-    ↓
-2. Blocklist check
-    ├─ Client IP whitelisted? → skip blocklist
-    ├─ Domain blocked? → return 0.0.0.0 / ::
-    └─ Not blocked →
-        ↓
-3. Authoritative zone check
-    ├─ Zone + record found? → authoritative response (aa flag, 0ms)
-    └─ Zone found, but no record (NXDOMAIN)?
-        ↓
-3.5 FWD fallback (if FWD record at zone apex)
-    ├─ FWD record present? → forward to FWD server (no aa flag)
-    └─ No FWD record → return NXDOMAIN
-        ↓
-4. Cache check
-    ├─ Cache hit? → cached response (0ms)
-    └─ Cache miss →
-        ↓
-4.5 Conditional forwarding (if rule configured for domain)
-    ├─ Rule matches (longest match)? → forward to configured DNS server + cache
-    └─ No rule →
-        ↓
-5. Forward to default upstream
-    ├─ Round-robin: 1.1.1.1, 8.8.8.8
-    ├─ UDP first, TCP fallback on truncation
-    └─ Cache response
-        ↓
-5.5 DNS Rebinding Protection (if enabled)
-    ├─ External domain resolves to private IP? → NXDOMAIN (attack blocked)
-    ├─ Domain on whitelist? → allow through
-    └─ No attack detected →
-        ↓
-Return response
-```
-
-### Components
-
-- **Server** (`server.go`): UDP/TCP listener, graceful shutdown, live upstream update
-- **Handler** (`handler.go`): Query processing pipeline
-- **Forwarder** (`forwarder.go`): Upstream DNS forwarding with round-robin, thread-safe upstream update
-- **ConditionalForwarder** (`forwarder.go`): Domain-specific forwarding rules, longest match
-- **BlocklistManager** (`blocklist.go`): In-memory blocklist + whitelist
-- **ZoneManager** (`zones.go`): Authoritative zones from file backend
-- **CacheManager** (`cache.go`): LRU cache with TTL expiration + cache warming (`warmup.go`)
-- **RebindingProtector** (`rebinding.go`): DNS rebinding protection (RFC1918/loopback detection)
-- **DDNSHandler** (`update.go`): RFC 2136 DNS UPDATE with TSIG authentication
-
-## Standalone Operation (single Pi)
-
-**No cluster required.** A single Pi runs fully self-contained:
-
-```yaml
-# /etc/domudns/config.yaml — minimal standalone configuration
-cluster:
-  role: "master"              # Default, can also be omitted
-  data_dir: "/var/lib/domudns/data"
-  # NO slaves: → no push, no sync, no sync secret required
-
-dnsserver:
-  listen: "[::]:53"
-  upstream: ["1.1.1.1", "8.8.8.8"]
-
-blocklist:
-  enabled: true
-  file_path: "/var/lib/domudns/blocklist.hosts"
-  fetch_interval: "24h"
-  default_urls:
-    - "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts"
-```
-
-In standalone mode:
-- ✅ Full DNS functionality (blocklist, zones, cache, FWD, PTR, conditional forwarding)
-- ✅ Full web UI and REST API (read + write)
-- ✅ Blocklist fetch every 24h
-- ✅ Prometheus metrics
-- No cluster sync (not needed)
-- No `DOMUDNS_SYNC_SECRET` required
-
-## Master/Slave Cluster
-
-For HA operation with multiple Raspberry Pis:
+## High Availability Cluster
 
 ```
 Pi 1 (Master) ──── HTTP Push ──→ Pi 2 (Slave)
-      └──────────── HTTP Push ──→ Pi 3 (Slave)
-
-Pi 2+3 poll master as fallback every 30s
 ```
 
-- **No external backend:** Data is stored as local JSON files
-- **Push protocol:** Master POSTs changes to all slaves (secured with HMAC-SHA256)
-- **Fallback polling:** Slaves poll master every 30s if push is missed
-- **Slave = read-only:** Configuration changes only possible on master
-- **Blocklist fetch:** Only master fetches external lists → propagates to slaves
+- Master pushes zone/blocklist/config changes to all slaves via HMAC-SHA256-signed HTTP
+- Slaves poll master as fallback every 30s
+- Set both IPs as DNS servers in your router's DHCP settings → automatic failover
 
-Full guide: [docs/clustering.md](docs/clustering.md)
+```yaml
+# Master (/etc/domudns/config.yaml)
+cluster:
+  role: "master"
+  slaves:
+    - "http://<SLAVE_IP>:80"
 
-## Monitoring
-
-```bash
-# Fetch Prometheus metrics
-curl http://192.0.2.1:9090/metrics
-
-# Key metrics:
-# dns_queries_total{qtype="A", result="forwarded"}
-# dns_query_duration_seconds{result="cached"}
-# api_requests_total{method="GET", path="/api/zones", status="200"}
+# Slave (/etc/domudns/config.yaml)
+cluster:
+  role: "slave"
+  master_url: "http://<MASTER_IP>:80"
 ```
 
-Monitoring stack (Prometheus + Grafana) in `monitoring/`:
+Full guide: [domudns.net/docs/cluster.html](https://domudns.net/docs/cluster.html)
 
-```bash
-cd monitoring && docker compose up -d
-# Grafana: http://localhost:3000
+---
+
+## Let's Encrypt DNS-01
+
+DomU DNS acts as a built-in ACME DNS-01 provider — no open port 80 required. Works with:
+
+- **Traefik** — native httpreq provider support
+- **Certbot** — DNS plugin (`certbot-dns-domudns`)
+- **acme.sh / Proxmox** — shell hook script included
+
+Full guide: [domudns.net/docs/letsencrypt.html](https://domudns.net/docs/letsencrypt.html)
+
+---
+
+## DNS Architecture
+
+```
+Incoming query (port 53)
+    ↓
+1. Blocklist check (O(1) hash lookup)
+    ↓
+2. DDNS UPDATE handler (RFC 2136, TSIG)
+    ↓
+3. AXFR/IXFR handler (zone transfers)
+    ↓
+4. ACME challenge TXT (_acme-challenge.*)
+    ↓
+5. Authoritative zone (Split-Horizon view-aware)
+    ↓
+6. LRU Cache
+    ↓
+7. Conditional forwarding (domain-specific upstreams)
+    ↓
+8. Default upstream (round-robin UDP, TCP fallback)
+    ↓
+9. DNS Rebinding Protection
+    ↓
+Return response
 ```
 
-## Troubleshooting
+---
 
-### DNS not working
+## REST API
 
-```bash
-# Check service status
-sudo systemctl status domudns
-sudo journalctl -u domudns -f
-
-# Test DNS query
-dig @127.0.0.1 google.com
-dig @127.0.0.1 example.com  # Authoritative zone
-
-# Health check
-curl http://localhost/api/health
-```
-
-### Blocklist not loading
+Full reference: [domudns.net/docs/api.html](https://domudns.net/docs/api.html)
 
 ```bash
-# Check blocklist status
-curl -H "Authorization: Bearer KEY" http://localhost/api/blocklist/urls
+# Create a zone
+curl -X POST http://<PI_IP>/api/zones \
+  -H "Authorization: Bearer <API_KEY>" \
+  -H "Content-Type: application/json" \
+  -d '{"domain": "home.lan", "ttl": 3600}'
 
-# Check logs (fetch errors?)
-sudo journalctl -u domudns | grep blocklist
+# Add a record
+curl -X POST http://<PI_IP>/api/zones/home.lan/records \
+  -H "Authorization: Bearer <API_KEY>" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "nas", "type": "A", "ttl": 3600, "value": "192.168.1.100"}'
 
-# Reload manually
-curl -X POST -H "Authorization: Bearer KEY" http://localhost/api/blocklist/reload
-```
-
-### Switch upstream DNS (live, no restart)
-
-```bash
-curl -X PATCH http://localhost/api/config \
-  -H "Authorization: Bearer KEY" \
+# Live config update (no restart)
+curl -X PATCH http://<PI_IP>/api/config \
+  -H "Authorization: Bearer <API_KEY>" \
   -H "Content-Type: application/json" \
   -d '{"dnsserver": {"upstream": ["9.9.9.9", "149.112.112.112"]}}'
 ```
 
-### Forgot password
+---
 
-```bash
-# Reset auth.json
-echo '{}' > /var/lib/domudns/data/auth.json
-sudo systemctl restart domudns
-# Now login again with admin/admin → setup wizard
-```
+## Operating Modes
 
-### Slave not synchronizing
+| Mode | Description | Config |
+|------|-------------|--------|
+| **Standalone** | Single node, full functionality | `role: "master"`, no `slaves:` |
+| **Master** | Pushes changes to slaves | `role: "master"` + `slaves: [...]` |
+| **Slave** | Receives from master, read-only API | `role: "slave"` + `master_url: ...` |
 
-```bash
-# Test master connection
-curl http://192.0.2.1/api/health
-
-# Check slave logs
-sudo journalctl -u domudns | grep -E "poll|sync|push"
-
-# Check sync secret (must be identical on all nodes)
-cat /etc/domudns/env | grep SYNC_SECRET
-```
+---
 
 ## Development
 
 ```bash
-# Run all tests
+make test           # All tests (unit + integration + security)
 make test-unit
-
-# Run a single test
-go test -v -run TestBlocklistManager ./internal/dnsserver/
-go test -v -run TestValidateRecord ./internal/dns/
-
-# Test DNS server locally (sudo for port 53)
-sudo ./build/domudns -config configs/config.dev.yaml
-
-# In another terminal
-dig @127.0.0.1 google.com
-dig -x 192.168.1.1 @127.0.0.1   # Reverse DNS (PTR)
+make test-integration
+make lint && make fmt
+sudo make run       # Port 53 requires root
 ```
+
+---
+
+## Troubleshooting
+
+```bash
+# Service status
+sudo systemctl status domudns
+sudo journalctl -u domudns -f
+
+# Test DNS
+dig @<PI_IP> google.com
+dig @<PI_IP> ads.doubleclick.net   # Should return 0.0.0.0 (blocked)
+
+# Health check
+curl http://<PI_IP>/api/health
+
+# Reset password (forgot credentials)
+echo '{}' > /var/lib/domudns/data/auth.json
+sudo systemctl restart domudns
+# → login with admin/admin → setup wizard
+```
+
+---
 
 ## License
 
 MIT License — see [LICENSE](LICENSE)
-
