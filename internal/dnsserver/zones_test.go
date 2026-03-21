@@ -190,6 +190,95 @@ func TestGenerateResponse_TTLOverride_SOA_NotAffected(t *testing.T) {
 	}
 }
 
+// TestGenerateResponse_CNAME_AQuery verifies RFC 1034 §4.3.2 CNAME chasing:
+// an A query for a name that only has a CNAME record must return the CNAME
+// plus the A record of the target (if the target is in the same zone).
+func TestGenerateResponse_CNAME_AQuery_InZone(t *testing.T) {
+	zm := NewZoneManager()
+	zone := &dnsinternal.Zone{
+		Domain: "example.com",
+		TTL:    300,
+		Records: []dnsinternal.Record{
+			{ID: 1, Name: "homepage", Type: dnsinternal.TypeCNAME, TTL: 300, Value: "npm.example.com"},
+			{ID: 2, Name: "npm", Type: dnsinternal.TypeA, TTL: 300, Value: "192.168.1.10"},
+		},
+	}
+	loadZonesManually(zm, zone)
+
+	req := new(mdns.Msg)
+	req.SetQuestion("homepage.example.com.", mdns.TypeA)
+	resp := zm.GenerateResponse(req, zone, "homepage")
+
+	if len(resp.Answer) != 2 {
+		t.Fatalf("answer count = %d, want 2 (CNAME + A)", len(resp.Answer))
+	}
+	cname, ok := resp.Answer[0].(*mdns.CNAME)
+	if !ok {
+		t.Fatalf("answer[0] type = %T, want *mdns.CNAME", resp.Answer[0])
+	}
+	if cname.Target != "npm.example.com." {
+		t.Errorf("CNAME target = %q, want \"npm.example.com.\"", cname.Target)
+	}
+	a, ok := resp.Answer[1].(*mdns.A)
+	if !ok {
+		t.Fatalf("answer[1] type = %T, want *mdns.A", resp.Answer[1])
+	}
+	if a.A.String() != "192.168.1.10" {
+		t.Errorf("A record = %s, want 192.168.1.10", a.A)
+	}
+}
+
+// TestGenerateResponse_CNAME_AQuery_ExternalTarget verifies that a CNAME pointing
+// outside the zone returns only the CNAME (resolver must follow the chain).
+func TestGenerateResponse_CNAME_AQuery_ExternalTarget(t *testing.T) {
+	zm := NewZoneManager()
+	zone := &dnsinternal.Zone{
+		Domain: "example.com",
+		TTL:    300,
+		Records: []dnsinternal.Record{
+			{ID: 1, Name: "alias", Type: dnsinternal.TypeCNAME, TTL: 300, Value: "target.other.com"},
+		},
+	}
+	loadZonesManually(zm, zone)
+
+	req := new(mdns.Msg)
+	req.SetQuestion("alias.example.com.", mdns.TypeA)
+	resp := zm.GenerateResponse(req, zone, "alias")
+
+	if len(resp.Answer) != 1 {
+		t.Fatalf("answer count = %d, want 1 (CNAME only)", len(resp.Answer))
+	}
+	if _, ok := resp.Answer[0].(*mdns.CNAME); !ok {
+		t.Fatalf("answer[0] type = %T, want *mdns.CNAME", resp.Answer[0])
+	}
+}
+
+// TestGenerateResponse_CNAME_CNAMEQuery verifies that a direct CNAME query
+// returns the CNAME record (existing behavior must not regress).
+func TestGenerateResponse_CNAME_CNAMEQuery(t *testing.T) {
+	zm := NewZoneManager()
+	zone := &dnsinternal.Zone{
+		Domain: "example.com",
+		TTL:    300,
+		Records: []dnsinternal.Record{
+			{ID: 1, Name: "alias", Type: dnsinternal.TypeCNAME, TTL: 300, Value: "target.example.com"},
+			{ID: 2, Name: "target", Type: dnsinternal.TypeA, TTL: 300, Value: "10.0.0.1"},
+		},
+	}
+	loadZonesManually(zm, zone)
+
+	req := new(mdns.Msg)
+	req.SetQuestion("alias.example.com.", mdns.TypeCNAME)
+	resp := zm.GenerateResponse(req, zone, "alias")
+
+	if len(resp.Answer) != 1 {
+		t.Fatalf("answer count = %d, want 1 (CNAME only for CNAME query)", len(resp.Answer))
+	}
+	if _, ok := resp.Answer[0].(*mdns.CNAME); !ok {
+		t.Fatalf("answer[0] type = %T, want *mdns.CNAME", resp.Answer[0])
+	}
+}
+
 func TestZoneManager_Stats(t *testing.T) {
 	zm := NewZoneManager()
 	loadZonesManually(zm,
