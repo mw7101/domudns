@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/mw7101/domudns/internal/cluster"
 	"github.com/mw7101/domudns/internal/dns"
@@ -57,20 +58,40 @@ func TestHMAC_ValidateSuccess(t *testing.T) {
 	receiver.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
 
-	// With empty secret → HMAC is not checked
+	// With empty secret → all sync requests are rejected (security hardening)
+	receiverNoSecret := cluster.NewReceiverHandler(fs, "", cluster.ReloadCallbacks{})
+	w2 := httptest.NewRecorder()
+	req2 := httptest.NewRequest(http.MethodPost, "/api/internal/sync", bytes.NewReader(body))
+	req2.Header.Set("Content-Type", "application/json")
+	receiverNoSecret.ServeHTTP(w2, req2)
+	assert.Equal(t, http.StatusUnauthorized, w2.Code)
+
+	// With valid secret and correct HMAC → accepted
+	validSecret := "anothersecret"
 	reloadCh := make(chan struct{}, 1)
-	receiverNoSecret := cluster.NewReceiverHandler(fs, "", cluster.ReloadCallbacks{
+	receiverValid := cluster.NewReceiverHandler(fs, validSecret, cluster.ReloadCallbacks{
 		ZoneReloader: func() error {
 			zoneReloaded = true
 			reloadCh <- struct{}{}
 			return nil
 		},
 	})
-	w2 := httptest.NewRecorder()
-	req2 := httptest.NewRequest(http.MethodPost, "/api/internal/sync", bytes.NewReader(body))
-	req2.Header.Set("Content-Type", "application/json")
-	receiverNoSecret.ServeHTTP(w2, req2)
-	assert.Equal(t, http.StatusNoContent, w2.Code)
+	// Build a valid body with timestamp + nonce (required for replay protection)
+	validTimestamp := time.Now().UnixNano()
+	validNonce := "deadbeef01234567deadbeef01234567"
+	validBody, _ := json.Marshal(cluster.SyncRequest{
+		Type:      cluster.EventZoneUpdated,
+		Data:      json.RawMessage(dataBytes),
+		Timestamp: validTimestamp,
+		Nonce:     validNonce,
+	})
+	validHMAC := cluster.ComputeHMACForTest(validSecret, cluster.EventZoneUpdated, validTimestamp, validNonce, dataBytes)
+	w3 := httptest.NewRecorder()
+	req3 := httptest.NewRequest(http.MethodPost, "/api/internal/sync", bytes.NewReader(validBody))
+	req3.Header.Set("Content-Type", "application/json")
+	req3.Header.Set("X-Sync-HMAC", validHMAC)
+	receiverValid.ServeHTTP(w3, req3)
+	assert.Equal(t, http.StatusNoContent, w3.Code)
 	// Wait for async goroutine
 	select {
 	case <-reloadCh:

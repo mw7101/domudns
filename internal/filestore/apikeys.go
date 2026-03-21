@@ -35,7 +35,9 @@ func (s *FileStore) CreateNamedAPIKey(_ context.Context, name, description strin
 	id := hex.EncodeToString(idBytes)
 
 	var keys []store.NamedAPIKey
-	_ = readJSON(s.apiKeysPath(), &keys)
+	if err := readJSON(s.apiKeysPath(), &keys); err != nil {
+		return nil, fmt.Errorf("read api keys: %w", err)
+	}
 
 	entry := store.NamedAPIKey{
 		ID:          id,
@@ -132,10 +134,11 @@ func (s *FileStore) ValidateNamedAPIKey(_ context.Context, key string) bool {
 	if err := readJSON(s.apiKeysPath(), &keys); err != nil {
 		return false
 	}
+	// Use constant-time comparison across all keys to prevent timing attacks.
+	// Avoid early-exit so execution time is independent of match position.
+	var found int
 	for _, k := range keys {
-		if subtle.ConstantTimeCompare([]byte(key), []byte(k.Key)) == 1 {
-			return true
-		}
+		found |= subtle.ConstantTimeCompare([]byte(key), []byte(k.Key))
 	}
-	return false
+	return found == 1
 }

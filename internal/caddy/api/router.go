@@ -27,9 +27,10 @@ type Router struct {
 	sessions           *SessionManager
 	metricsEnabled     bool
 	clusterHandler     http.Handler        // /api/internal/* (nil if no cluster)
-	clusterInfoHandler *ClusterInfoHandler // /api/cluster (nil if not configured)
-	slaveMode          bool                // true when this node is a slave
-	masterURL          string              // master URL for slave error messages
+	clusterInfoHandler *ClusterInfoHandler  // /api/cluster (nil if not configured)
+	importExport       *ImportExportHandler // /api/zones/import, /api/zones/{domain}/export
+	slaveMode          bool                 // true when this node is a slave
+	masterURL          string               // master URL for slave error messages
 }
 
 // NewRouter creates a new API router.
@@ -96,6 +97,11 @@ func (r *Router) SetClusterHandler(h http.Handler) {
 // SetClusterInfoHandler sets the handler for GET /api/cluster.
 func (r *Router) SetClusterInfoHandler(h *ClusterInfoHandler) {
 	r.clusterInfoHandler = h
+}
+
+// SetImportExportHandler sets the handler for zone import/export endpoints.
+func (r *Router) SetImportExportHandler(h *ImportExportHandler) {
+	r.importExport = h
 }
 
 // SetSlaveMode enables read-only mode for this node.
@@ -177,6 +183,12 @@ func (r *Router) apiHandler(req *http.Request) http.Handler {
 	case path == "/api/zones" || strings.HasPrefix(path, "/api/zones/"):
 		if strings.Contains(path, "/records") {
 			return r.records
+		}
+		// Import/export routes take priority over the general zone handler
+		if r.importExport != nil && (strings.HasSuffix(path, "/export") ||
+			path == "/api/zones/import" ||
+			path == "/api/zones/import/axfr") {
+			return r.importExport
 		}
 		return r.zones
 	case strings.HasPrefix(path, "/api/acme/dns-01"), strings.HasPrefix(path, "/api/acme/httpreq/"):

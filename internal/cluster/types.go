@@ -37,8 +37,10 @@ const (
 
 // SyncRequest is the HTTP body for POST /api/internal/sync.
 type SyncRequest struct {
-	Type SyncEventType   `json:"type"`
-	Data json.RawMessage `json:"data"`
+	Type      SyncEventType   `json:"type"`
+	Data      json.RawMessage `json:"data"`
+	Timestamp int64           `json:"ts"`    // Unix nanoseconds; required for replay protection
+	Nonce     string          `json:"nonce"` // 16-byte random hex; required for replay protection
 }
 
 // URLDomainsPayload contains domains for a blocklist URL (gzip + base64).

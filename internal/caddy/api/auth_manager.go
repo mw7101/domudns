@@ -102,7 +102,8 @@ func (am *AuthManager) SetNamedKeyStore(s NamedAPIKeyStore) {
 
 // ValidateAnyKey checks the root API key first, then all named API keys.
 // Used by AuthMiddleware so both root and named keys grant access.
-func (am *AuthManager) ValidateAnyKey(key string) bool {
+// ctx is the HTTP request context and is forwarded to the key store for cancellation/logging.
+func (am *AuthManager) ValidateAnyKey(ctx context.Context, key string) bool {
 	if am.ValidateAPIKey(key) {
 		return true
 	}
@@ -110,7 +111,7 @@ func (am *AuthManager) ValidateAnyKey(key string) bool {
 	ks := am.keyStore
 	am.mu.RUnlock()
 	if ks != nil {
-		return ks.ValidateNamedAPIKey(context.Background(), key)
+		return ks.ValidateNamedAPIKey(ctx, key)
 	}
 	return false
 }

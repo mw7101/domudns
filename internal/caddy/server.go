@@ -19,8 +19,9 @@ var webAssets embed.FS
 
 // Server is the HTTP/API server.
 type Server struct {
-	config *config.CaddyConfig
-	server *http.Server
+	config           *config.CaddyConfig
+	server           *http.Server
+	cancelMiddleware context.CancelFunc // stops background goroutines (rate limiter cleanup)
 }
 
 // ServerOptions holds optional parameters for NewServer.
@@ -119,10 +120,15 @@ func newServerWithOpts(cfg *config.Config, authManager *api.AuthManager, store a
 	// Register named API keys handler
 	apiKeysHandler := api.NewAPIKeysHandler(store)
 	router.SetAPIKeysHandler(apiKeysHandler)
+	// Register zone import/export handler
+	router.SetImportExportHandler(api.NewImportExportHandler(store, zoneReload))
+	// middlewareCtx is used to stop background goroutines (e.g. rate limiter cleanup) on shutdown.
+	// cancelMiddleware is called in Shutdown() to release resources.
+	middlewareCtx, cancelMiddleware := context.WithCancel(context.Background())
 	var apiHandler http.Handler = router
 	if cfg.System.RateLimit.Enabled {
 		trustProxy := cfg.Caddy.API.TrustProxy
-		apiHandler = api.RateLimitMiddleware(apiRateLimit, trustProxy, router)
+		apiHandler = api.RateLimitMiddleware(middlewareCtx, apiRateLimit, trustProxy, router)
 	}
 
 	var rootHandler http.Handler
@@ -180,13 +186,20 @@ func newServerWithOpts(cfg *config.Config, authManager *api.AuthManager, store a
 	}
 	mux := http.NewServeMux()
 	// Register DoH endpoint directly at the mux (public, no auth, no API prefix).
+	// Apply rate limiting to DoH to prevent amplification / DoS attacks.
 	if opts.DoHHandler != nil {
 		dohPath := opts.DoHPath
 		if dohPath == "" {
 			dohPath = "/dns-query"
 		}
 		log.Info().Str("path", dohPath).Msg("DoH server enabled")
-		mux.Handle(dohPath, opts.DoHHandler)
+		var dohHandler http.Handler = opts.DoHHandler
+		if cfg.System.RateLimit.Enabled {
+			trustProxy := cfg.Caddy.API.TrustProxy
+			dohRateLimit := cfg.System.RateLimit.APIRequests * 3 // more generous than API
+			dohHandler = api.RateLimitMiddleware(middlewareCtx, dohRateLimit, trustProxy, opts.DoHHandler)
+		}
+		mux.Handle(dohPath, dohHandler)
 	}
 	mux.Handle("/", rootHandler)
 
@@ -203,7 +216,8 @@ func newServerWithOpts(cfg *config.Config, authManager *api.AuthManager, store a
 	handler := api.CORSMiddleware(cfg.Caddy.API.CORSAllowedOrigins, api.MaxBytesMiddleware(mux))
 
 	return &Server{
-		config: &cfg.Caddy,
+		config:           &cfg.Caddy,
+		cancelMiddleware: cancelMiddleware,
 		server: &http.Server{
 			Addr:         addr,
 			Handler:      handler,
@@ -242,7 +256,10 @@ func (s *Server) Start(ctx context.Context) error {
 	return nil
 }
 
-// Shutdown gracefully stops the server.
+// Shutdown gracefully stops the server and cancels background middleware goroutines.
 func (s *Server) Shutdown(ctx context.Context) error {
+	if s.cancelMiddleware != nil {
+		s.cancelMiddleware()
+	}
 	return s.server.Shutdown(ctx)
 }

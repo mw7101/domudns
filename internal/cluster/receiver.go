@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mw7101/domudns/internal/dns"
@@ -29,19 +30,29 @@ type ReloadCallbacks struct {
 	DDNSKeyReloader func() error
 }
 
+// replayWindowSec is the maximum age difference (seconds) allowed between
+// the event timestamp and the current time. Events outside this window are rejected.
+const replayWindowSec = 300 // 5 minutes
+
+// nonceTTL is how long a seen nonce is kept in memory. Must be > replayWindowSec.
+const nonceTTL = 10 * time.Minute
+
 // ReceiverHandler receives sync events from the master and updates the local FileStore.
 type ReceiverHandler struct {
-	store     *filestore.FileStore
-	secret    string
-	callbacks ReloadCallbacks
+	store      *filestore.FileStore
+	secret     string
+	callbacks  ReloadCallbacks
+	nonceMu    sync.Mutex
+	seenNonces map[string]time.Time // nonce → time received; cleaned up periodically
 }
 
 // NewReceiverHandler creates a new ReceiverHandler.
 func NewReceiverHandler(store *filestore.FileStore, secret string, callbacks ReloadCallbacks) *ReceiverHandler {
 	return &ReceiverHandler{
-		store:     store,
-		secret:    secret,
-		callbacks: callbacks,
+		store:      store,
+		secret:     secret,
+		callbacks:  callbacks,
+		seenNonces: make(map[string]time.Time),
 	}
 }
 
@@ -51,7 +62,7 @@ func (h *ReceiverHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	body, err := io.ReadAll(io.LimitReader(r.Body, 64*1024*1024)) // max 64MB (for large blocklists)
+	body, err := io.ReadAll(io.LimitReader(r.Body, 16*1024*1024)) // max 16MB
 	if err != nil {
 		http.Error(w, "read body failed", http.StatusBadRequest)
 		return
@@ -61,17 +72,45 @@ func (h *ReceiverHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
-	// Validate HMAC
+	// Validate HMAC — secret is always required; no secret = reject all sync requests
 	providedHMAC := r.Header.Get("X-Sync-HMAC")
-	if h.secret != "" {
-		if err := validateHMAC(h.secret, req.Type, req.Data, providedHMAC); err != nil {
-			log.Warn().
-				Str("event", string(req.Type)).
-				Str("remote", r.RemoteAddr).
-				Msg("cluster: invalid sync HMAC")
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
+	if h.secret == "" {
+		log.Error().
+			Str("remote", r.RemoteAddr).
+			Msg("cluster: sync rejected — no HMAC secret configured")
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if err := validateHMAC(h.secret, req.Type, req.Timestamp, req.Nonce, req.Data, providedHMAC); err != nil {
+		log.Warn().
+			Str("event", string(req.Type)).
+			Str("remote", r.RemoteAddr).
+			Msg("cluster: invalid sync HMAC")
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	// Validate timestamp: reject events more than replayWindowSec seconds old or in the future.
+	nowSec := time.Now().Unix()
+	tsSec := req.Timestamp / 1_000_000_000
+	diff := nowSec - tsSec
+	if diff < 0 {
+		diff = -diff
+	}
+	if diff > replayWindowSec {
+		log.Warn().
+			Str("remote", r.RemoteAddr).
+			Int64("ts_diff_sec", diff).
+			Msg("cluster: sync rejected — timestamp outside replay window")
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	// Validate nonce: reject replayed requests with duplicate nonces.
+	if err := h.checkAndStoreNonce(req.Nonce); err != nil {
+		log.Warn().
+			Str("remote", r.RemoteAddr).
+			Msg("cluster: sync rejected — duplicate nonce")
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
 	}
 	ctx := r.Context()
 	if err := h.applyEvent(ctx, req); err != nil {
@@ -120,6 +159,9 @@ func (h *ReceiverHandler) applyZoneUpdated(ctx context.Context, data json.RawMes
 	var zone dns.Zone
 	if err := json.Unmarshal(data, &zone); err != nil {
 		return fmt.Errorf("unmarshal zone: %w", err)
+	}
+	if err := dns.ValidateZone(&zone); err != nil {
+		return fmt.Errorf("validate zone: %w", err)
 	}
 	if err := h.store.PutZone(ctx, &zone); err != nil {
 		return fmt.Errorf("put zone: %w", err)
@@ -196,8 +238,8 @@ func (h *ReceiverHandler) applyWhitelistIPs(ctx context.Context, data json.RawMe
 	return nil
 }
 
-// maxDecompressedSize limits decompressed blocklist data to 256 MB (protection against ZIP bombs).
-const maxDecompressedSize = 256 * 1024 * 1024
+// maxDecompressedSize limits decompressed blocklist data to 16 MB (protection against ZIP bombs).
+const maxDecompressedSize = 16 * 1024 * 1024
 
 func (h *ReceiverHandler) applyURLDomains(ctx context.Context, data json.RawMessage) error {
 	var payload URLDomainsPayload
@@ -297,6 +339,28 @@ func (h *ReceiverHandler) applyAPIKeys(ctx context.Context, data json.RawMessage
 	if err := h.store.SetNamedAPIKeys(ctx, keys); err != nil {
 		return fmt.Errorf("set api keys: %w", err)
 	}
+	return nil
+}
+
+// checkAndStoreNonce verifies that nonce has not been seen before and records it.
+// Old nonces (older than nonceTTL) are evicted on each call.
+// Returns an error if the nonce is empty or was already seen.
+func (h *ReceiverHandler) checkAndStoreNonce(nonce string) error {
+	if nonce == "" {
+		return fmt.Errorf("empty nonce")
+	}
+	h.nonceMu.Lock()
+	defer h.nonceMu.Unlock()
+	cutoff := time.Now().Add(-nonceTTL)
+	for n, t := range h.seenNonces {
+		if t.Before(cutoff) {
+			delete(h.seenNonces, n)
+		}
+	}
+	if _, exists := h.seenNonces[nonce]; exists {
+		return fmt.Errorf("duplicate nonce")
+	}
+	h.seenNonces[nonce] = time.Now()
 	return nil
 }
 

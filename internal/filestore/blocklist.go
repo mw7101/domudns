@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/mw7101/domudns/internal/store"
+	"github.com/rs/zerolog/log"
 )
 
 // ListBlocklistURLs returns all blocklist URLs.
@@ -72,9 +73,11 @@ func (s *FileStore) RemoveBlocklistURL(_ context.Context, id int) error {
 	if err := atomicWriteJSON(s.urlsPath(), newURLs); err != nil {
 		return err
 	}
-	// Delete domain file for this URL
+	// Delete domain file for this URL (best-effort; URL already removed from list)
 	domainPath := filepath.Join(s.urlDomainsDir(), fmt.Sprintf("%d.domains.gz", id))
-	_ = os.Remove(domainPath)
+	if err := os.Remove(domainPath); err != nil && !os.IsNotExist(err) {
+		log.Warn().Err(err).Str("path", domainPath).Msg("filestore: remove blocklist domain file failed")
+	}
 	return nil
 }
 

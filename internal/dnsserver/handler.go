@@ -11,7 +11,14 @@ import (
 	"github.com/mw7101/domudns/pkg/metrics"
 	"github.com/miekg/dns"
 	"github.com/rs/zerolog/log"
+	"golang.org/x/sync/singleflight"
 )
+
+// upstreamResult is the shared result type used by sfGroup (singleflight).
+type upstreamResult struct {
+	resp     *dns.Msg
+	upstream string
+}
 
 // Handler handles DNS queries
 type Handler struct {
@@ -38,6 +45,9 @@ type Handler struct {
 	splitHorizon *SplitHorizonResolver
 	// acme serves ACME DNS-01 challenges as TXT records (nil = disabled).
 	acme ACMEChallengeReader
+	// sfGroup deduplicates concurrent upstream requests for the same domain+type
+	// (thundering-herd protection on cache misses).
+	sfGroup singleflight.Group
 }
 
 // NewHandler creates a new DNS query handler
@@ -299,17 +309,29 @@ func (h *Handler) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 		}
 	}
 
-	// Forward to upstream (ForwardTracked also returns the upstream server used)
-	upstreamReq := h.dnssec.PrepareRequest(r)
-	resp, upstream, err := h.forwarder.ForwardTracked(upstreamReq)
-	if err != nil {
-		log.Error().Err(err).Str("qname", q.Name).Msg("forward error")
+	// Forward to upstream with singleflight deduplication: concurrent cache-miss requests
+	// for the same domain+type share one upstream round-trip (thundering-herd protection).
+	sfKey := q.Name + "/" + dns.TypeToString[q.Qtype]
+	sfVal, sfErr, _ := h.sfGroup.Do(sfKey, func() (interface{}, error) {
+		req := h.dnssec.PrepareRequest(r)
+		msg, up, err := h.forwarder.ForwardTracked(req)
+		if err != nil {
+			return nil, err
+		}
+		return &upstreamResult{resp: msg, upstream: up}, nil
+	})
+	if sfErr != nil {
+		log.Error().Err(sfErr).Str("qname", q.Name).Msg("forward error")
 		metrics.DNSQueriesTotal.WithLabelValues(qtype, "error").Inc()
 		metrics.DNSQueryDuration.WithLabelValues("error").Observe(time.Since(start).Seconds())
 		h.queryLogger.LogQuery(clientIP.String(), q.Name, qtype, querylog.ResultError, "", time.Since(start), dns.RcodeServerFailure)
 		h.respondError(w, r, dns.RcodeServerFailure)
 		return
 	}
+	sfResult := sfVal.(*upstreamResult)
+	// Copy the shared response so each caller can set its own message ID and process DNSSEC independently.
+	resp := sfResult.resp.Copy()
+	upstream := sfResult.upstream
 
 	// Phase 5.5: DNS Rebinding Protection
 	// Checks upstream responses for rebinding attacks (public domain → private IP).

@@ -399,7 +399,7 @@ func TestOWASP_API4_RateLimitEnforced(t *testing.T) {
 	handler := api.AuthMiddleware(authMgr4, api.NewSessionManager(), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
-	wrapped := api.RateLimitMiddleware(2, false, handler) // 2 req/min
+	wrapped := api.RateLimitMiddleware(context.Background(), 2, false, handler) // 2 req/min
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.RemoteAddr = "192.168.1.100:12345"

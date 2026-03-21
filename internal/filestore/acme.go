@@ -2,6 +2,7 @@ package filestore
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -18,8 +19,13 @@ func (s *FileStore) PutACMEChallenge(_ context.Context, fqdn, value string, ttl 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// Normalize to lowercase without trailing dot — consistent with GetACMEChallenge.
+	fqdn = strings.ToLower(strings.TrimSuffix(fqdn, "."))
+
 	var challenges []acmeChallenge
-	_ = readJSON(s.acmePath(), &challenges)
+	if err := readJSON(s.acmePath(), &challenges); err != nil {
+		return fmt.Errorf("read acme challenges: %w", err)
+	}
 
 	// Replace existing challenge for this FQDN
 	found := false

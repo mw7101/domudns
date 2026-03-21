@@ -74,13 +74,16 @@ export const BLOCKLIST_SUGGESTIONS = [
   },
 ]
 
+// Compiled once at module load — avoids per-line regex compilation in parsePrometheus.
+const PROMETHEUS_LINE_RE = /^([a-zA-Z_:][a-zA-Z0-9_:]*)\{?([^}]*)\}?\s+([\d.e+\-]+)/
+
 // Prometheus text format parser
 export function parsePrometheus(text: string): Record<string, { total: number; samples: { labels: string; value: number }[] }> {
   const result: Record<string, { total: number; samples: { labels: string; value: number }[] }> = {}
   if (!text) return result
   for (const line of text.split('\n')) {
     if (line.startsWith('#') || !line.trim()) continue
-    const match = line.match(/^([a-zA-Z_:][a-zA-Z0-9_:]*)\{?([^}]*)\}?\s+([\d.e+\-]+)/)
+    const match = line.match(PROMETHEUS_LINE_RE)
     if (!match) continue
     const [, name, labelsStr, valStr] = match
     const value = parseFloat(valStr)

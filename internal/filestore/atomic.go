@@ -14,7 +14,7 @@ import (
 // Uses temp-file + os.Rename (guaranteed atomic on Linux).
 func atomicWriteJSON(path string, v interface{}) error {
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0700); err != nil {
 		return fmt.Errorf("mkdir %s: %w", dir, err)
 	}
 	tmp, err := os.CreateTemp(dir, ".tmp-")
@@ -68,7 +68,7 @@ func readJSON(path string, v interface{}) error {
 // writeGzipDomains writes domains gzip-compressed as newline-separated strings.
 func writeGzipDomains(path string, domains []string) error {
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0700); err != nil {
 		return fmt.Errorf("mkdir %s: %w", dir, err)
 	}
 	tmp, err := os.CreateTemp(dir, ".tmp-gz-")
@@ -97,7 +97,10 @@ func writeGzipDomains(path string, domains []string) error {
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("close temp: %w", err)
 	}
-	return os.Rename(tmpPath, path)
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("rename: %w", err)
+	}
+	return nil
 }
 
 // readGzipDomains reads newline-separated domains from a gzip file.

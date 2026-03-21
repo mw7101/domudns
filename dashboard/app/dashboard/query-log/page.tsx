@@ -109,7 +109,7 @@ function FilterBar({ filter, onChange }: { filter: Filter; onChange: (f: Filter)
 
 // ─── Row Menu ─────────────────────────────────────────────────────────────────
 
-function RowMenu({ entry, onWhitelisted }: { entry: QueryLogEntry; onWhitelisted: (domain: string) => void }) {
+function RowMenu({ entry, onWhitelisted, onError }: { entry: QueryLogEntry; onWhitelisted: (domain: string) => void; onError: (msg: string) => void }) {
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const [done, setDone] = useState(false)
@@ -135,7 +135,8 @@ function RowMenu({ entry, onWhitelisted }: { entry: QueryLogEntry; onWhitelisted
       setOpen(false)
       onWhitelisted(entry.domain)
     } catch (err) {
-      console.error('Failed to whitelist domain:', err)
+      const msg = err instanceof Error ? err.message : 'Unbekannter Fehler'
+      onError(`Fehler beim Freigeben: ${msg}`)
       setOpen(false)
     } finally {
       setLoading(false)
@@ -184,10 +185,11 @@ function RowMenu({ entry, onWhitelisted }: { entry: QueryLogEntry; onWhitelisted
 
 // ─── Log Table ─────────────────────────────────────────────────────────────────
 
-function LogTable({ entries, loading, onWhitelisted }: {
+function LogTable({ entries, loading, onWhitelisted, onError }: {
   entries: QueryLogEntry[]
   loading: boolean
   onWhitelisted: (domain: string) => void
+  onError: (msg: string) => void
 }) {
   if (loading && entries.length === 0) {
     return (
@@ -251,7 +253,7 @@ function LogTable({ entries, loading, onWhitelisted }: {
               <td className="py-1 px-2">
                 {/* Menu visible only for blocked domains; for others visible on hover */}
                 <div className={e.blocked ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 transition-opacity'}>
-                  <RowMenu entry={e} onWhitelisted={onWhitelisted} />
+                  <RowMenu entry={e} onWhitelisted={onWhitelisted} onError={onError} />
                 </div>
               </td>
             </tr>
@@ -274,7 +276,7 @@ export default function QueryLogPage() {
   const [loading, setLoading] = useState(true)
   const [autoRefresh, setAutoRefresh] = useState(true)
   const [filter, setFilter] = useState<Filter>({ client: '', domain: '', result: '', qtype: '', limit: 100 })
-  const [toast, setToast] = useState<string | null>(null)
+  const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const fetchLog = useCallback(async () => {
@@ -309,7 +311,7 @@ export default function QueryLogPage() {
     _whitelistedDomains.add(domain)
     // Remove trailing dot for toast display
     const displayDomain = domain.replace(/\.$/, '')
-    setToast(`✓ "${displayDomain}" zur Erlaubt-Liste hinzugefügt`)
+    setToast({ msg: `✓ "${displayDomain}" zur Erlaubt-Liste hinzugefügt`, type: 'success' })
     setTimeout(() => setToast(null), 4000)
     // Immediately set row to "allowed" → green color as visual feedback
     setEntries(prev => prev.map(e =>
@@ -374,14 +376,18 @@ export default function QueryLogPage() {
 
         {/* Table */}
         <div className="bg-[#100c1e] neon-card rounded-xl overflow-hidden">
-          <LogTable entries={entries} loading={loading} onWhitelisted={handleWhitelisted} />
+          <LogTable entries={entries} loading={loading} onWhitelisted={handleWhitelisted} onError={msg => { setToast({ msg, type: 'error' }); setTimeout(() => setToast(null), 5000) }} />
         </div>
 
       </div>
       {/* Toast notification */}
       {toast && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 px-4 py-2.5 bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 text-sm rounded-xl shadow-lg backdrop-blur-sm">
-          {toast}
+        <div className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 px-4 py-2.5 text-sm rounded-xl shadow-lg backdrop-blur-sm border ${
+          toast.type === 'error'
+            ? 'bg-red-500/20 border-red-500/30 text-red-400'
+            : 'bg-emerald-500/20 border-emerald-500/30 text-emerald-400'
+        }`}>
+          {toast.msg}
         </div>
       )}
     </>

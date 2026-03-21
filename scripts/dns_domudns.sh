@@ -19,6 +19,15 @@
 #   POST /api/acme/dns-01/present  { "domain": "...", "txt_value": "..." }
 #   POST /api/acme/dns-01/cleanup  { "domain": "..." }
 
+# shellcheck disable=SC2034
+dns_domudns_info='DomU DNS
+Site: domudns.net
+Docs: github.com/domudns/domudns/wiki/acme
+Options:
+ DOMUDNS_URL Base URL of the DomU DNS instance
+ DOMUDNS_API_KEY Named API key from DomU DNS dashboard
+'
+
 dns_domudns_add() {
   local fulldomain="$1"
   local txtvalue="$2"

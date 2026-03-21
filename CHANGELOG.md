@@ -2,6 +2,55 @@
 
 All notable changes to DomU DNS will be documented in this file.
 
+## [v0.1.4]
+
+#### Added
+
+- **RFC 1035 zone file import** (`POST /api/zones/import`): Multipart file upload of BIND-format zone files. Supports automatic domain detection from SOA record and optional `view` parameter for split-horizon zones.
+- **AXFR live transfer import** (`POST /api/zones/import/axfr`): Imports a zone directly from a running DNS server via AXFR (RFC 5936). Accepts `{"server": "1.2.3.4:53", "domain": "example.com", "view": ""}`.
+- **Zone file export** (`GET /api/zones/{domain}/export`): Downloads a zone as an RFC 1035 zone file (`Content-Disposition: attachment`). Supports `?view=` for split-horizon zones.
+- **Merge semantics**: When importing into an existing zone, records are merged — all existing records sharing the same (Name, Type) combination as an imported record are replaced; unaffected records remain unchanged.
+- **Dashboard import modal**: New "Importieren" button in the zone list opens a modal with two tabs — "Zone File" (file upload) and "AXFR Transfer" (server + domain form).
+- **Dashboard export button**: "↓ Export .zone" button in the zone detail view downloads the zone file directly to the browser.
+
+#### Security
+
+- **Cluster replay protection** (`internal/cluster/`): `SyncRequest` now carries a Unix-nanosecond timestamp and a 16-byte random nonce. Both fields are bound into the HMAC. The receiver rejects events outside a 5-minute window and deduplicates nonces for 10 minutes, making replayed cluster events impossible.
+- **Cluster HMAC now mandatory** (`internal/cluster/receiver.go`): Sync requests are always rejected when no HMAC secret is configured — previously, an empty secret allowed unauthenticated cluster sync.
+- **Cluster payload limits** (`internal/cluster/receiver.go`): Reduced HTTP body limit from 64 MB to 16 MB and gzip decompression limit from 256 MB to 16 MB to mitigate ZIP-bomb / DoS attacks.
+- **Zone validation after cluster deserialization** (`internal/cluster/receiver.go`): `applyZoneUpdated` now calls `dns.ValidateZone` before writing the zone to disk, preventing a compromised master from pushing malformed zones to slaves.
+- **Blocklist SSRF protection** (`internal/blocklist/fetcher.go`): `FetchURL` uses a custom `DialContext` that resolves hostnames and rejects private/loopback IPs. A `CheckRedirect` hook blocks redirects to internal addresses, preventing server-side request forgery via admin-configured blocklist URLs.
+- **DoH rate limiting** (`internal/caddy/server.go`): DNS-over-HTTPS endpoint is now covered by the same rate limiter as the API (3× the API limit) to prevent amplification and DoS attacks.
+- **Named API key timing attack** (`internal/filestore/apikeys.go`): `ValidateNamedAPIKey` now uses a constant-time loop without early exit, preventing timing side-channels that could reveal key position.
+- **ACME FQDN case normalization** (`internal/filestore/acme.go`): `PutACMEChallenge` now normalises the FQDN to lowercase on write, matching the case-insensitive lookup in `GetACMEChallenge` and eliminating duplicate entries for the same domain.
+- **ACME TXT value limit reduced to 255 bytes** (`internal/caddy/api/acme.go`): Aligns with RFC 1035 §3.3 (single TXT string limit). ACME challenge values are 43 bytes, making the previous 512-byte limit excessively permissive.
+- **Request context propagated to key store** (`internal/caddy/api/auth_manager.go`, `middleware.go`): `ValidateAnyKey` now accepts a `context.Context` and forwards it to the named-key store, replacing the previous `context.Background()` call.
+- **File permissions** (`internal/filestore/atomic.go`): Data directories are now created with mode `0700` instead of `0755` to prevent world-readable access to zone and config files.
+- **Default credentials not logged** (`cmd/domudns/main.go`): Removed `admin/admin` from the setup-wizard log message.
+
+#### Performance
+
+- **Singleflight for upstream cache-miss** (`internal/dnsserver/handler.go`): Concurrent cache-miss requests for the same domain+type now share a single upstream round-trip instead of N parallel ones (thundering-herd protection). Each caller receives an independent copy of the response via `resp.Copy()`.
+- **Cache warmup concurrency reduced** (`internal/dnsserver/warmup.go`): Goroutine count reduced from 10 to 6 to better match the RPi 3B's 4 cores without starving the DNS and HTTP servers during startup.
+- **API request timeout** (`dashboard/lib/api.ts`): All `fetch` calls now have a 30-second timeout via `AbortController` to prevent indefinitely hanging requests.
+- **Prometheus regex** (`dashboard/lib/utils.ts`): Regex in `parsePrometheus` is now compiled once as a module constant instead of per loop iteration.
+
+#### Fixed
+
+- **Silent JSON read errors in filestore** (`internal/filestore/apikeys.go`, `acme.go`): Corrupted JSON files now return an error instead of silently resetting state and overwriting data.
+- **`os.Rename` error not wrapped** (`internal/filestore/atomic.go`): `writeGzipDomains` now wraps the rename error with `fmt.Errorf` for consistent error context, matching `atomicWriteJSON`.
+- **WarmCache panic recovery** (`cmd/domudns/main.go`): The warmup goroutine now has a `defer recover()` so a panic during cache warmup does not crash the server.
+- **splitHorizonResolver race condition** (`cmd/domudns/main.go`): Concurrent access from `splitHorizonUpdater` and `configReloader` is now guarded by `sync.Mutex`.
+- **WarmupEnabled override bug** (`internal/config/config.go`): Removed the default that forced `WarmupEnabled=true` when cache was enabled, which prevented explicit opt-out. A new `warmup_disabled: true` config field allows clean opt-out.
+- **Blocklist domain file removal error ignored** (`internal/filestore/blocklist.go`): Failure to delete the domain file on URL removal is now logged as a warning instead of being silently swallowed.
+- **RateLimitMiddleware goroutine** (`internal/caddy/api/middleware.go`, `internal/caddy/server.go`): Cleanup goroutine now accepts a `context.Context` and stops on server shutdown — previously leaked indefinitely.
+- **Dashboard error feedback** (`dashboard/app/dashboard/query-log/page.tsx`): Whitelist errors are now shown as a red toast to the user instead of being silently swallowed in `console.error`.
+- **acme.sh/Proxmox DNS plugin** (`scripts/dns_domudns.sh`): Renamed info variable from `dns_hetzner_info` to `dns_domudns_info` so Proxmox ACME UI correctly detects and lists the plugin in the DNS API dropdown.
+
+#### Changed
+
+- **Let's Encrypt docs** (`website/docs/letsencrypt.html`): Expanded Proxmox section into a full "Option D: Proxmox Cluster" guide with all 4 manual installation steps — plugin file distribution to all nodes, schema registration in `dns-challenge-schema.json`, service restart, UI plugin configuration, and per-node certificate setup. Added two Proxmox-specific troubleshooting entries.
+
 ## [v0.1.3]
 
 ### 2026-03-14

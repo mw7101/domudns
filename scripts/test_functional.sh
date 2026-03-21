@@ -616,8 +616,13 @@ if [[ "$SKIP_DNS" == "0" ]]; then
 
     # Öffentliche Domain (Upstream-Forwarding)
     dns_query "A" "dns.quad9.net"
-    # NXDOMAIN für nicht-existente Domain
-    dns_query "A" "nonexistent.invalid." ""
+    # NXDOMAIN für nicht-existente Domain (.invalid ist IANA-reserviert → niemals auflösbar)
+    _rcode=$(dns_rcode "nonexistent.invalid.")
+    if [[ "$_rcode" == "NXDOMAIN" || "$_rcode" == "SERVFAIL" || -z "$_rcode" ]]; then
+        ok "DNS A nonexistent.invalid. → NXDOMAIN/keine Antwort (rcode=${_rcode:-leer})"
+    else
+        fail "DNS A nonexistent.invalid. → erwartet NXDOMAIN, bekommen $_rcode"
+    fi
 else
     section "7. DNS-Auflösung"
     skip "DNS-Tests (SKIP_DNS=1)"
