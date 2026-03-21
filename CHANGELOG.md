@@ -2,6 +2,25 @@
 
 All notable changes to DomU DNS will be documented in this file.
 
+## [v0.2.0]
+
+### Added
+
+- **Cache TTL decrement**: DNS responses served from cache now have their TTL values decremented by the elapsed time since caching, in compliance with RFC 1035. Previously, cached responses always returned the original TTL regardless of how long the entry had been cached.
+- **Cache management API**: New endpoints to inspect and control the DNS cache:
+  - `GET /api/cache` — returns cache statistics (entries, hits, misses, hit rate) and a list of up to 500 entries sorted by remaining TTL
+  - `DELETE /api/cache` — flushes all cache entries (local only; allowed on slave nodes)
+  - `DELETE /api/cache/{name}/{type}` — removes a specific cache entry by FQDN and record type
+- **Cache management dashboard**: New page at `/dashboard/cache/` showing live cache statistics (KPI cards for entries, hit rate, hits, misses) and a sortable entry list with per-entry delete and a global flush button.
+
+- **SOA editor in dashboard**: SOA records are now editable in the zone detail view — displayed as a pinned first row in the record table with an amber SOA badge. A dedicated edit modal provides fields for MName, RName, Refresh, Retry, Expire, and Minimum TTL; the serial is auto-incremented (YYYYMMDDnn) and shown read-only as a preview.
+
+### Fixed
+
+- **Underscores in DNS labels**: DHCP hostnames and DNS labels now allow underscore characters, in compliance with real-world DNS usage (e.g. `_dmarc`, SRV service labels).
+- **Underscores in FQDN record targets**: PTR, MX, NS, and SRV record targets now accept underscores in their FQDN values (e.g. `_sip._tcp.example.com`).
+- **Cache KpiCard label prop**: Replaced deprecated `title` prop with `label` in the cache dashboard KPI cards.
+
 ## [v0.1.5]
 
 #### Fixed

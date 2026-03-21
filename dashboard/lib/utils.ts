@@ -45,7 +45,7 @@ export function formatRecordValue(r: {
 
 export const RECORD_TYPE_COLORS: Record<string, string> = {
   A: '#0ea5e9',
-  AAAA: '#a855f7',
+  AAAA: '#0284c7',
   MX: '#06b6d4',
   CNAME: '#f59e0b',
   TXT: '#22c55e',

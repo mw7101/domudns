@@ -1,19 +1,47 @@
 'use client'
 
 import { cn } from '@/lib/utils'
-import { motion, AnimatePresence } from 'framer-motion'
+import { AnimatePresence, motion } from 'framer-motion'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { auth } from '@/lib/api'
 import { DomULogoIcon } from './DomULogo'
+import {
+  LayoutDashboard,
+  Activity,
+  Globe,
+  Shield,
+  Radio,
+  Settings,
+  LogOut,
+  BarChart2,
+  Database,
+} from 'lucide-react'
 
-const NAV_ITEMS = [
-  { href: '/dashboard/overview/', label: 'Übersicht', icon: '◈' },
-  { href: '/dashboard/monitoring/', label: 'Monitoring', icon: '◉' },
-  { href: '/dashboard/zones/', label: 'Zonen', icon: '⬡' },
-  { href: '/dashboard/query-log/', label: 'Query-Log', icon: '◷' },
-  { href: '/dashboard/dhcp/', label: 'DHCP-Leases', icon: '⇄' },
-  { href: '/dashboard/settings/', label: 'Einstellungen', icon: '◎' },
+const NAV_GROUPS = [
+  {
+    label: 'Monitor',
+    items: [
+      { href: '/dashboard/overview/',    icon: LayoutDashboard, label: 'Übersicht' },
+      { href: '/dashboard/monitoring/',  icon: BarChart2,        label: 'Monitoring' },
+      { href: '/dashboard/query-log/',   icon: Activity,         label: 'Query-Log' },
+    ],
+  },
+  {
+    label: 'DNS',
+    items: [
+      { href: '/dashboard/zones/',       icon: Globe,     label: 'Zonen' },
+      { href: '/dashboard/blocklist/',   icon: Shield,    label: 'Blocklist' },
+      { href: '/dashboard/cache/',       icon: Database,  label: 'Cache' },
+      { href: '/dashboard/dhcp/',        icon: Radio,     label: 'DHCP-Leases' },
+    ],
+  },
+  {
+    label: 'System',
+    items: [
+      { href: '/dashboard/settings/',    icon: Settings, label: 'Einstellungen' },
+    ],
+  },
 ]
 
 interface SidebarProps {
@@ -34,9 +62,9 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
   const sidebarContent = (
     <div className="flex flex-col h-full">
       {/* Logo */}
-      <div className="flex items-center gap-3 px-5 py-6 border-b border-[#2a1f42]">
-        <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-violet-600 to-purple-700 flex items-center justify-center shrink-0">
-          <DomULogoIcon size={22} />
+      <div className="flex items-center gap-3 px-5 py-5 border-b border-[var(--border)]">
+        <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-amber-600 to-amber-500 flex items-center justify-center shrink-0">
+          <DomULogoIcon size={20} />
         </div>
         <div>
           <div className="text-sm font-bold text-[var(--text)] leading-none">DomU DNS</div>
@@ -45,41 +73,45 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 px-3 py-4 space-y-1">
-        {NAV_ITEMS.map((item) => {
-          const isActive = pathname.startsWith(item.href.replace(/\/$/, ''))
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              onClick={onClose}
-              className={cn(
-                'flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-150',
-                isActive
-                  ? 'bg-violet-500/15 text-violet-400 border border-violet-500/20'
-                  : 'text-[var(--muted-2)] hover:text-[var(--text)] hover:bg-[#2a1f42]/50'
-              )}
-            >
-              <span className="text-base w-5 text-center">{item.icon}</span>
-              {item.label}
-              {isActive && (
-                <motion.div
-                  layoutId="sidebar-indicator"
-                  className="ml-auto w-1.5 h-1.5 rounded-full bg-violet-400"
-                />
-              )}
-            </Link>
-          )
-        })}
+      <nav className="flex-1 px-3 py-3 overflow-y-auto">
+        {NAV_GROUPS.map((group) => (
+          <div key={group.label} className="mb-4">
+            <div className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--muted)]">
+              {group.label}
+            </div>
+            <div className="space-y-0.5">
+              {group.items.map((item) => {
+                const isActive = pathname.startsWith(item.href.replace(/\/$/, ''))
+                const Icon = item.icon
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    onClick={onClose}
+                    className={cn(
+                      'flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors duration-150',
+                      isActive
+                        ? 'bg-amber-500/12 text-amber-400 border border-amber-500/20'
+                        : 'text-[var(--muted-2)] hover:text-[var(--text)] hover:bg-[var(--surface-3)]'
+                    )}
+                  >
+                    <Icon size={15} strokeWidth={isActive ? 2.5 : 1.75} />
+                    {item.label}
+                  </Link>
+                )
+              })}
+            </div>
+          </div>
+        ))}
       </nav>
 
       {/* Logout */}
-      <div className="px-3 py-4 border-t border-[#2a1f42]">
+      <div className="px-3 py-3 border-t border-[var(--border)]">
         <button
           onClick={handleLogout}
-          className="flex items-center gap-3 w-full px-3 py-2.5 rounded-xl text-sm font-medium text-[var(--muted-2)] hover:text-red-400 hover:bg-red-500/10 transition-all duration-150"
+          className="flex items-center gap-2.5 w-full px-3 py-2 rounded-lg text-sm font-medium text-[var(--muted-2)] hover:text-red-400 hover:bg-red-500/10 transition-colors duration-150"
         >
-          <span className="text-base w-5 text-center">→</span>
+          <LogOut size={15} strokeWidth={1.75} />
           Abmelden
         </button>
       </div>
@@ -89,7 +121,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
   return (
     <>
       {/* Desktop Sidebar */}
-      <aside className="hidden lg:flex flex-col w-56 bg-[#100c1e] border-r border-[#2a1f42] shrink-0 h-screen sticky top-0">
+      <aside className="hidden lg:flex flex-col w-56 bg-[var(--surface-2)] border-r border-[var(--border)] shrink-0 h-screen sticky top-0">
         {sidebarContent}
       </aside>
 
@@ -101,15 +133,16 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
+              transition={{ duration: 0.15 }}
               className="fixed inset-0 z-40 bg-black/60 lg:hidden"
               onClick={onClose}
             />
             <motion.aside
-              initial={{ x: -240 }}
+              initial={{ x: -224 }}
               animate={{ x: 0 }}
-              exit={{ x: -240 }}
-              transition={{ type: 'spring', stiffness: 400, damping: 40 }}
-              className="fixed left-0 top-0 z-50 w-56 h-full bg-[#100c1e] border-r border-[#2a1f42] lg:hidden"
+              exit={{ x: -224 }}
+              transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+              className="fixed left-0 top-0 z-50 w-56 h-full bg-[var(--surface-2)] border-r border-[var(--border)] lg:hidden"
             >
               {sidebarContent}
             </motion.aside>

@@ -20,17 +20,17 @@ export function BackgroundGradient({
     <div className={cn('relative group', containerClassName)}>
       <div
         className={cn(
-          'absolute -inset-px rounded-[18px] opacity-70 group-hover:opacity-100 transition-opacity duration-500',
+          'absolute -inset-px rounded-[18px] opacity-60 group-hover:opacity-90 transition-opacity duration-500',
           animate && 'animate-pulse'
         )}
         style={{
-          background: 'linear-gradient(135deg, #7c3aed, #a855f7, #c084fc, #7c3aed)',
+          background: 'linear-gradient(135deg, #D97706, #F59E0B, #FCD34D, #D97706)',
           backgroundSize: '300% 300%',
         }}
       />
       <div
         className={cn(
-          'relative rounded-2xl bg-[#100c1e] border border-[#2a1f42]',
+          'relative rounded-2xl bg-[var(--surface-2)] border border-[var(--border)]',
           className
         )}
       >

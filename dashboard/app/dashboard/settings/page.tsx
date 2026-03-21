@@ -54,8 +54,8 @@ const BLOCKLIST_SUB_TABS: { key: BlocklistSubTab; label: string; info: string }[
 
 // ─── Shared helper functions ─────────────────────────────────────────────────
 
-const inputCls = 'w-full px-3 py-2 rounded-xl bg-[#080612] border border-[#2a1f42] text-[#f0eeff] text-sm focus:outline-none focus:border-violet-500 transition-colors'
-const labelCls = 'flex items-center gap-1.5 text-xs font-semibold text-[#9a8cbf] uppercase tracking-wider mb-2'
+const inputCls = 'w-full px-3 py-2 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] text-sm focus:outline-none focus:border-amber-500 transition-colors'
+const labelCls = 'flex items-center gap-1.5 text-xs font-semibold text-[var(--muted-2)] uppercase tracking-wider mb-2'
 
 function Spinner() {
   return <span className="inline-block w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" />
@@ -65,12 +65,12 @@ function Card({ title, subtitle, children, headerRight }: {
   title?: string; subtitle?: string; children: React.ReactNode; headerRight?: React.ReactNode
 }) {
   return (
-    <div className="bg-[#100c1e] neon-card rounded-2xl overflow-hidden">
+    <div className="bg-[var(--surface-2)] neon-card rounded-2xl overflow-hidden">
       {title && (
-        <div className="flex items-start justify-between px-5 py-4 border-b border-[#2a1f42]">
+        <div className="flex items-start justify-between px-5 py-4 border-b border-[var(--border)]">
           <div>
-            <h3 className="text-sm font-semibold text-[#f0eeff]">{title}</h3>
-            {subtitle && <p className="text-xs text-[#6b5f8a] mt-0.5">{subtitle}</p>}
+            <h3 className="text-sm font-semibold text-[var(--text)]">{title}</h3>
+            {subtitle && <p className="text-xs text-[var(--muted)] mt-0.5">{subtitle}</p>}
           </div>
           {headerRight}
         </div>
@@ -88,7 +88,7 @@ function ToggleSwitch({ checked, onChange, disabled }: {
       type="button"
       onClick={() => onChange(!checked)}
       disabled={disabled}
-      className={`relative inline-flex h-6 w-10 shrink-0 items-center rounded-full transition-colors disabled:opacity-50 ${checked ? 'bg-violet-500' : 'bg-[#2a1f42]'}`}
+      className={`relative inline-flex h-6 w-10 shrink-0 items-center rounded-full transition-colors disabled:opacity-50 ${checked ? 'bg-amber-500' : 'bg-[var(--border)]'}`}
     >
       <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${checked ? 'translate-x-5' : 'translate-x-1'}`} />
     </button>
@@ -99,7 +99,7 @@ function FormToggle({ name, defaultChecked }: { name: string; defaultChecked?: b
   return (
     <label className="relative inline-flex items-center cursor-pointer shrink-0">
       <input name={name} type="checkbox" defaultChecked={defaultChecked} className="sr-only peer" />
-      <div className="w-10 h-6 bg-[#2a1f42] rounded-full peer peer-checked:bg-violet-500 transition-colors after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:translate-x-4" />
+      <div className="w-10 h-6 bg-[var(--border)] rounded-full peer peer-checked:bg-amber-500 transition-colors after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:translate-x-4" />
     </label>
   )
 }
@@ -108,13 +108,13 @@ function ToggleRow({ label, hint, tooltip, children }: {
   label: string; hint?: string; tooltip?: string; children: React.ReactNode
 }) {
   return (
-    <div className="flex items-center justify-between gap-4 py-3 border-t border-[#2a1f42]">
+    <div className="flex items-center justify-between gap-4 py-3 border-t border-[var(--border)]">
       <div className="min-w-0">
-        <div className="flex items-center gap-1.5 text-sm font-medium text-[#f0eeff]">
+        <div className="flex items-center gap-1.5 text-sm font-medium text-[var(--text)]">
           <span>{label}</span>
           {tooltip && <InfoTooltip text={tooltip} />}
         </div>
-        {hint && <div className="text-xs text-[#6b5f8a]">{hint}</div>}
+        {hint && <div className="text-xs text-[var(--muted)]">{hint}</div>}
       </div>
       {children}
     </div>
@@ -178,7 +178,7 @@ function DNSTab({ cfg, onSaved }: { cfg: Config; onSaved: () => void }) {
             <InfoTooltip text="Netzwerk-Adresse und Port, auf dem der DNS-Server lauscht. [::]:53 = IPv4+IPv6." />
           </label>
           <input name="dns_listen" defaultValue={dns.listen ?? '[::]:53'} className={inputCls} />
-          <p className="text-xs text-[#6b5f8a] mt-1">[::]:53 für IPv4+IPv6 Dual-Stack</p>
+          <p className="text-xs text-[var(--muted)] mt-1">[::]:53 für IPv4+IPv6 Dual-Stack</p>
         </div>
         <div>
           <label className={labelCls}>
@@ -186,7 +186,7 @@ function DNSTab({ cfg, onSaved }: { cfg: Config; onSaved: () => void }) {
             <InfoTooltip text="Externe DNS-Server für unbekannte Domains. Werden im Round-Robin rotiert." />
           </label>
           <input name="dns_upstream" defaultValue={(dns.upstream ?? []).join(', ') || '1.1.1.1, 8.8.8.8'} className={inputCls} />
-          <p className="text-xs text-[#6b5f8a] mt-1">Cloudflare: 1.1.1.1 · Google: 8.8.8.8 · Quad9: 9.9.9.9</p>
+          <p className="text-xs text-[var(--muted)] mt-1">Cloudflare: 1.1.1.1 · Google: 8.8.8.8 · Quad9: 9.9.9.9</p>
         </div>
       </Card>
 
@@ -219,7 +219,7 @@ function DNSTab({ cfg, onSaved }: { cfg: Config; onSaved: () => void }) {
         <div>
           <label className={labelCls}><span>DoH-Pfad</span></label>
           <input name="doh_path" defaultValue={doh.path ?? '/dns-query'} className={inputCls} placeholder="/dns-query" />
-          <p className="text-xs text-[#6b5f8a] mt-1">Standard: /dns-query · Neustart erforderlich</p>
+          <p className="text-xs text-[var(--muted)] mt-1">Standard: /dns-query · Neustart erforderlich</p>
         </div>
       </Card>
 
@@ -230,7 +230,7 @@ function DNSTab({ cfg, onSaved }: { cfg: Config; onSaved: () => void }) {
         <div>
           <label className={labelCls}><span>DoT-Listen-Adresse</span></label>
           <input name="dot_listen" defaultValue={dot.listen ?? '[::]:853'} className={inputCls} placeholder="[::]:853" />
-          <p className="text-xs text-[#6b5f8a] mt-1">Neustart erforderlich</p>
+          <p className="text-xs text-[var(--muted)] mt-1">Neustart erforderlich</p>
         </div>
         <div className="grid grid-cols-2 gap-4">
           <div>
@@ -302,7 +302,7 @@ function BlocklistTab({ cfg, onSaved }: { cfg: Config; onSaved: () => void }) {
                 <InfoTooltip text="Wie oft Blocklist-Quellen neu heruntergeladen werden." />
               </label>
               <input name="bl_interval" defaultValue={bl.fetch_interval ?? '24h'} className={inputCls} />
-              <p className="text-xs text-[#6b5f8a] mt-1">z.B. 24h, 12h, 6h</p>
+              <p className="text-xs text-[var(--muted)] mt-1">z.B. 24h, 12h, 6h</p>
             </div>
             <div>
               <label className={labelCls}>
@@ -313,7 +313,7 @@ function BlocklistTab({ cfg, onSaved }: { cfg: Config; onSaved: () => void }) {
                 <option value="zero_ip">zero_ip — 0.0.0.0 / :: zurückgeben</option>
                 <option value="nxdomain">nxdomain — Domain existiert nicht</option>
               </select>
-              <p className="text-xs text-[#6b5f8a] mt-1">Live-Reload — kein Neustart nötig</p>
+              <p className="text-xs text-[var(--muted)] mt-1">Live-Reload — kein Neustart nötig</p>
             </div>
           </div>
           <div className="pt-1">
@@ -327,17 +327,17 @@ function BlocklistTab({ cfg, onSaved }: { cfg: Config; onSaved: () => void }) {
       {/* Management Sub-Tabs */}
       <div>
         <div className="flex items-center gap-3 mb-3">
-          <h3 className="text-sm font-semibold text-[#f0eeff]">Verwaltung</h3>
+          <h3 className="text-sm font-semibold text-[var(--text)]">Verwaltung</h3>
         </div>
         <div className="overflow-x-auto pb-1">
-          <div className="flex gap-1 bg-[#100c1e] neon-card rounded-xl p-1 w-max">
+          <div className="flex gap-1 bg-[var(--surface-2)] neon-card rounded-xl p-1 w-max">
             {BLOCKLIST_SUB_TABS.map((t) => (
               <button
                 key={t.key}
                 onClick={() => setSubTab(t.key)}
                 className={cn(
                   'flex items-center gap-1.5 whitespace-nowrap px-3 py-1.5 rounded-lg text-sm font-medium transition-all',
-                  subTab === t.key ? 'bg-violet-500/20 text-violet-400' : 'text-[#9a8cbf] hover:text-[#f0eeff]'
+                  subTab === t.key ? 'bg-amber-500/10 text-amber-400' : 'text-[var(--muted-2)] hover:text-[var(--text)]'
                 )}
               >
                 <span>{t.label}</span>
@@ -459,13 +459,13 @@ function URLsTab() {
     } finally { setActivatingUrl(null) }
   }
 
-  if (loading) return <div className="flex items-center justify-center h-32"><div className="w-6 h-6 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" /></div>
+  if (loading) return <div className="flex items-center justify-center h-32"><div className="w-6 h-6 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" /></div>
 
   return (
     <div className="space-y-4">
-      <div className="bg-[#100c1e] neon-card rounded-2xl overflow-hidden">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-[#2a1f42]">
-          <h3 className="text-sm font-semibold text-[#f0eeff]">Beliebte Blocklisten</h3>
+      <div className="bg-[var(--surface-2)] neon-card rounded-2xl overflow-hidden">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border)]">
+          <h3 className="text-sm font-semibold text-[var(--text)]">Beliebte Blocklisten</h3>
           <MovingBorderButton onClick={() => setAddOpen(true)}>+ URL hinzufügen</MovingBorderButton>
         </div>
         <div className="p-4 space-y-3">
@@ -474,18 +474,18 @@ function URLsTab() {
             const isActive = ex?.enabled
             const isActivating = activatingUrl === s.url
             return (
-              <div key={s.url} className="flex items-center justify-between gap-4 p-3 rounded-xl bg-[#080612] border border-[#2a1f42]">
+              <div key={s.url} className="flex items-center justify-between gap-4 p-3 rounded-xl bg-[var(--surface)] border border-[var(--border)]">
                 <div>
-                  <div className="text-sm font-medium text-[#f0eeff]">{s.name}</div>
-                  <div className="text-xs text-[#6b5f8a] mt-0.5">{s.desc}</div>
+                  <div className="text-sm font-medium text-[var(--text)]">{s.name}</div>
+                  <div className="text-xs text-[var(--muted)] mt-0.5">{s.desc}</div>
                 </div>
                 <button
                   onClick={() => !isActive && !isActivating && handleActivateSuggestion(s)}
                   disabled={!!isActive || isActivating}
                   className={cn('shrink-0 min-w-[90px] flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors',
                     isActive ? 'bg-green-500/15 text-green-400 cursor-default'
-                    : isActivating ? 'bg-violet-500/10 text-violet-400 cursor-wait'
-                    : 'bg-violet-500/20 text-violet-400 hover:bg-violet-500/30'
+                    : isActivating ? 'bg-amber-500/10 text-amber-400 cursor-wait'
+                    : 'bg-amber-500/10 text-amber-400 hover:bg-amber-500/10'
                   )}
                 >
                   {isActivating ? <><Spinner /> Lädt …</> : isActive ? '✓ Aktiv' : 'Aktivieren'}
@@ -497,44 +497,44 @@ function URLsTab() {
       </div>
 
       {urls.length > 0 && (
-        <div className="bg-[#100c1e] neon-card rounded-2xl overflow-hidden">
-          <div className="px-5 py-4 border-b border-[#2a1f42]">
-            <h3 className="text-sm font-semibold text-[#f0eeff]">{urls.length} konfigurierte URLs</h3>
+        <div className="bg-[var(--surface-2)] neon-card rounded-2xl overflow-hidden">
+          <div className="px-5 py-4 border-b border-[var(--border)]">
+            <h3 className="text-sm font-semibold text-[var(--text)]">{urls.length} konfigurierte URLs</h3>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-[#2a1f42]">
+                <tr className="border-b border-[var(--border)]">
                   {['URL', 'Status', 'Letzter Abruf', 'Fehler', ''].map((h) => (
-                    <th key={h} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[#9a8cbf]">{h}</th>
+                    <th key={h} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[var(--muted-2)]">{h}</th>
                   ))}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-[#080612]">
+              <tbody className="divide-y divide-[var(--surface)]">
                 {urls.map((u) => {
                   const isFetching = fetchingId === u.id
                   const isToggling = togglingId === u.id
                   const isDeleting = deletingId === u.id
                   return (
-                    <tr key={u.id} className="hover:bg-[#1a1230] transition-colors">
+                    <tr key={u.id} className="hover:bg-[var(--surface-3)] transition-colors">
                       <td className="px-4 py-3 max-w-xs">
-                        <a href={u.url} target="_blank" rel="noopener noreferrer" className="text-violet-400 hover:text-violet-300 text-xs truncate block">{u.url}</a>
+                        <a href={u.url} target="_blank" rel="noopener noreferrer" className="text-amber-400 hover:text-amber-400 text-xs truncate block">{u.url}</a>
                       </td>
                       <td className="px-4 py-3">
                         <span className={cn('inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium', u.enabled ? 'bg-green-500/15 text-green-400' : 'bg-slate-500/15 text-slate-400')}>
                           {u.enabled ? 'Aktiv' : 'Inaktiv'}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-xs text-[#6b5f8a]">
-                        {isFetching ? <span className="flex items-center gap-1.5 text-violet-400"><Spinner /> Läuft …</span> : fmtDate(u.last_fetched_at)}
+                      <td className="px-4 py-3 text-xs text-[var(--muted)]">
+                        {isFetching ? <span className="flex items-center gap-1.5 text-amber-400"><Spinner /> Läuft …</span> : fmtDate(u.last_fetched_at)}
                       </td>
                       <td className="px-4 py-3 text-xs text-red-400 max-w-[120px] truncate">{u.last_error ?? ''}</td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1.5">
-                          <button onClick={() => handleToggle(u.id, u.enabled)} disabled={isToggling || isFetching} className="min-w-[72px] flex items-center justify-center gap-1 text-xs text-[#9a8cbf] hover:text-[#f0eeff] disabled:opacity-50 px-2 py-1 rounded border border-[#2a1f42] transition-colors">
+                          <button onClick={() => handleToggle(u.id, u.enabled)} disabled={isToggling || isFetching} className="min-w-[72px] flex items-center justify-center gap-1 text-xs text-[var(--muted-2)] hover:text-[var(--text)] disabled:opacity-50 px-2 py-1 rounded border border-[var(--border)] transition-colors">
                             {isToggling ? <><Spinner /> …</> : u.enabled ? 'Deakt.' : 'Aktivieren'}
                           </button>
-                          <button onClick={() => handleFetch(u.id)} disabled={isFetching || isToggling} className="min-w-[72px] flex items-center justify-center gap-1 text-xs text-[#9a8cbf] hover:text-[#f0eeff] disabled:opacity-50 px-2 py-1 rounded border border-[#2a1f42] transition-colors">
+                          <button onClick={() => handleFetch(u.id)} disabled={isFetching || isToggling} className="min-w-[72px] flex items-center justify-center gap-1 text-xs text-[var(--muted-2)] hover:text-[var(--text)] disabled:opacity-50 px-2 py-1 rounded border border-[var(--border)] transition-colors">
                             {isFetching ? <><Spinner /> Läuft …</> : 'Abrufen'}
                           </button>
                           <button onClick={() => handleDelete(u.id)} disabled={isDeleting || isFetching} className="min-w-[60px] flex items-center justify-center gap-1 text-xs text-red-400 hover:text-red-300 disabled:opacity-50 px-2 py-1 rounded border border-red-500/30 transition-colors">
@@ -554,15 +554,15 @@ function URLsTab() {
       <AnimatedModal isOpen={addOpen} onClose={() => setAddOpen(false)} title="Externe Blocklist hinzufügen">
         <div className="space-y-4">
           <div>
-            <label className="block text-xs font-semibold text-[#9a8cbf] uppercase tracking-wider mb-2">URL</label>
+            <label className="block text-xs font-semibold text-[var(--muted-2)] uppercase tracking-wider mb-2">URL</label>
             <input type="url" value={newUrl} onChange={(e) => setNewUrl(e.target.value)} placeholder="https://…" autoFocus className={inputCls} />
           </div>
           <label className="flex items-center gap-3 cursor-pointer">
             <input type="checkbox" checked={newEnabled} onChange={(e) => setNewEnabled(e.target.checked)} className="w-4 h-4" />
-            <span className="text-sm text-[#9a8cbf]">Sofort aktivieren &amp; abrufen</span>
+            <span className="text-sm text-[var(--muted-2)]">Sofort aktivieren &amp; abrufen</span>
           </label>
           <div className="flex gap-3 pt-2">
-            <button onClick={() => setAddOpen(false)} disabled={adding} className="flex-1 px-4 py-2 rounded-xl border border-[#2a1f42] text-[#9a8cbf] text-sm hover:text-[#f0eeff] disabled:opacity-50 transition-colors">Abbrechen</button>
+            <button onClick={() => setAddOpen(false)} disabled={adding} className="flex-1 px-4 py-2 rounded-xl border border-[var(--border)] text-[var(--muted-2)] text-sm hover:text-[var(--text)] disabled:opacity-50 transition-colors">Abbrechen</button>
             <MovingBorderButton onClick={handleAdd} disabled={adding} className="flex-1">
               {adding ? <span className="flex items-center justify-center gap-2"><Spinner /> Lädt …</span> : 'Hinzufügen'}
             </MovingBorderButton>
@@ -622,27 +622,27 @@ function DomainsTab({ mode }: { mode: 'blocked' | 'allowed' }) {
     } finally { setDeletingDomain(null) }
   }
 
-  if (loading) return <div className="flex items-center justify-center h-32"><div className="w-6 h-6 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" /></div>
+  if (loading) return <div className="flex items-center justify-center h-32"><div className="w-6 h-6 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" /></div>
 
   return (
-    <div className="bg-[#100c1e] neon-card rounded-2xl overflow-hidden">
-      <div className="flex items-center justify-between px-5 py-4 border-b border-[#2a1f42]">
-        <h3 className="text-sm font-semibold text-[#f0eeff]">{domains.length} {countLabel} Domains</h3>
+    <div className="bg-[var(--surface-2)] neon-card rounded-2xl overflow-hidden">
+      <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border)]">
+        <h3 className="text-sm font-semibold text-[var(--text)]">{domains.length} {countLabel} Domains</h3>
         <MovingBorderButton onClick={() => setAddOpen(true)}>+ {addLabel}</MovingBorderButton>
       </div>
       {domains.length > 0 ? (
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-[#2a1f42]">
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[#9a8cbf]">Domain</th>
+              <tr className="border-b border-[var(--border)]">
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[var(--muted-2)]">Domain</th>
                 <th className="px-4 py-3" />
               </tr>
             </thead>
-            <tbody className="divide-y divide-[#080612]">
+            <tbody className="divide-y divide-[var(--surface)]">
               {domains.map((d) => (
-                <tr key={d} className="hover:bg-[#1a1230] transition-colors">
-                  <td className="px-4 py-3 font-mono text-xs text-[#f0eeff]">{d}</td>
+                <tr key={d} className="hover:bg-[var(--surface-3)] transition-colors">
+                  <td className="px-4 py-3 font-mono text-xs text-[var(--text)]">{d}</td>
                   <td className="px-4 py-3 text-right">
                     <button onClick={() => handleDelete(d)} disabled={deletingDomain === d} className="min-w-[80px] flex items-center justify-center gap-1 ml-auto text-xs text-red-400 hover:text-red-300 disabled:opacity-50 px-2 py-1 rounded border border-red-500/30 transition-colors">
                       {deletingDomain === d ? <><Spinner /> …</> : 'Entfernen'}
@@ -655,18 +655,18 @@ function DomainsTab({ mode }: { mode: 'blocked' | 'allowed' }) {
         </div>
       ) : (
         <div className="flex flex-col items-center justify-center py-12 gap-3">
-          <div className="text-sm font-medium text-[#f0eeff]">Keine Einträge</div>
+          <div className="text-sm font-medium text-[var(--text)]">Keine Einträge</div>
           <MovingBorderButton onClick={() => setAddOpen(true)}>+ {addLabel}</MovingBorderButton>
         </div>
       )}
       <AnimatedModal isOpen={addOpen} onClose={() => setAddOpen(false)} title={addLabel}>
         <div className="space-y-4">
           <div>
-            <label className="block text-xs font-semibold text-[#9a8cbf] uppercase tracking-wider mb-2">Domain</label>
+            <label className="block text-xs font-semibold text-[var(--muted-2)] uppercase tracking-wider mb-2">Domain</label>
             <input value={newDomain} onChange={(e) => setNewDomain(e.target.value)} placeholder="ads.example.com" autoFocus className={inputCls} />
           </div>
           <div className="flex gap-3 pt-2">
-            <button onClick={() => setAddOpen(false)} disabled={adding} className="flex-1 px-4 py-2 rounded-xl border border-[#2a1f42] text-[#9a8cbf] text-sm hover:text-[#f0eeff] disabled:opacity-50 transition-colors">Abbrechen</button>
+            <button onClick={() => setAddOpen(false)} disabled={adding} className="flex-1 px-4 py-2 rounded-xl border border-[var(--border)] text-[var(--muted-2)] text-sm hover:text-[var(--text)] disabled:opacity-50 transition-colors">Abbrechen</button>
             <MovingBorderButton onClick={handleAdd} disabled={adding} className="flex-1">
               {adding ? <span className="flex items-center justify-center gap-2"><Spinner /> Speichert …</span> : addLabel}
             </MovingBorderButton>
@@ -720,19 +720,19 @@ function IPWhitelistTab() {
     } finally { setDeletingIP(null) }
   }
 
-  if (loading) return <div className="flex items-center justify-center h-32"><div className="w-6 h-6 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" /></div>
+  if (loading) return <div className="flex items-center justify-center h-32"><div className="w-6 h-6 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" /></div>
 
   return (
-    <div className="bg-[#100c1e] neon-card rounded-2xl overflow-hidden">
-      <div className="flex items-center justify-between px-5 py-4 border-b border-[#2a1f42]">
-        <h3 className="text-sm font-semibold text-[#f0eeff]">{ips.length} IP-Whitelist Einträge</h3>
+    <div className="bg-[var(--surface-2)] neon-card rounded-2xl overflow-hidden">
+      <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border)]">
+        <h3 className="text-sm font-semibold text-[var(--text)]">{ips.length} IP-Whitelist Einträge</h3>
         <MovingBorderButton onClick={() => setAddOpen(true)}>+ IP/CIDR hinzufügen</MovingBorderButton>
       </div>
       {ips.length > 0 ? (
         <div className="p-4 space-y-2">
           {ips.map((ip) => (
-            <div key={ip} className="flex items-center justify-between px-4 py-3 bg-[#080612] rounded-xl border border-[#2a1f42]">
-              <span className="font-mono text-sm text-[#f0eeff]">{ip}</span>
+            <div key={ip} className="flex items-center justify-between px-4 py-3 bg-[var(--surface)] rounded-xl border border-[var(--border)]">
+              <span className="font-mono text-sm text-[var(--text)]">{ip}</span>
               <button onClick={() => handleDelete(ip)} disabled={deletingIP === ip} className="min-w-[80px] flex items-center justify-center gap-1 text-xs text-red-400 hover:text-red-300 disabled:opacity-50 px-2 py-1 rounded border border-red-500/30 transition-colors">
                 {deletingIP === ip ? <><Spinner /> …</> : 'Entfernen'}
               </button>
@@ -741,20 +741,20 @@ function IPWhitelistTab() {
         </div>
       ) : (
         <div className="flex flex-col items-center justify-center py-12 gap-3 px-5">
-          <div className="text-sm font-medium text-[#f0eeff]">Keine IP-Whitelist</div>
-          <div className="text-xs text-[#6b5f8a] text-center">IPs in dieser Liste umgehen die Blocklist komplett.<br />Tipp: &bdquo;localhost&ldquo; fügt 127.0.0.1 und ::1 hinzu.</div>
+          <div className="text-sm font-medium text-[var(--text)]">Keine IP-Whitelist</div>
+          <div className="text-xs text-[var(--muted)] text-center">IPs in dieser Liste umgehen die Blocklist komplett.<br />Tipp: &bdquo;localhost&ldquo; fügt 127.0.0.1 und ::1 hinzu.</div>
           <MovingBorderButton onClick={() => setAddOpen(true)} className="mt-1">+ IP/CIDR hinzufügen</MovingBorderButton>
         </div>
       )}
       <AnimatedModal isOpen={addOpen} onClose={() => setAddOpen(false)} title="IP oder CIDR hinzufügen">
         <div className="space-y-4">
           <div>
-            <label className="block text-xs font-semibold text-[#9a8cbf] uppercase tracking-wider mb-2">IP oder CIDR</label>
+            <label className="block text-xs font-semibold text-[var(--muted-2)] uppercase tracking-wider mb-2">IP oder CIDR</label>
             <input value={newIP} onChange={(e) => setNewIP(e.target.value)} placeholder="localhost, 192.168.0.0/24, ::1" autoFocus className={inputCls} />
-            <p className="text-xs text-[#6b5f8a] mt-1">&bdquo;localhost&ldquo; → fügt 127.0.0.1 und ::1 hinzu</p>
+            <p className="text-xs text-[var(--muted)] mt-1">&bdquo;localhost&ldquo; → fügt 127.0.0.1 und ::1 hinzu</p>
           </div>
           <div className="flex gap-3 pt-2">
-            <button onClick={() => setAddOpen(false)} disabled={adding} className="flex-1 px-4 py-2 rounded-xl border border-[#2a1f42] text-[#9a8cbf] text-sm hover:text-[#f0eeff] disabled:opacity-50 transition-colors">Abbrechen</button>
+            <button onClick={() => setAddOpen(false)} disabled={adding} className="flex-1 px-4 py-2 rounded-xl border border-[var(--border)] text-[var(--muted-2)] text-sm hover:text-[var(--text)] disabled:opacity-50 transition-colors">Abbrechen</button>
             <MovingBorderButton onClick={handleAdd} disabled={adding} className="flex-1">
               {adding ? <span className="flex items-center justify-center gap-2"><Spinner /> Speichert …</span> : 'Hinzufügen'}
             </MovingBorderButton>
@@ -812,7 +812,7 @@ function PatternsTab() {
     } finally { setDeletingId(null) }
   }
 
-  if (loading) return <div className="flex items-center justify-center h-32"><div className="w-6 h-6 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" /></div>
+  if (loading) return <div className="flex items-center justify-center h-32"><div className="w-6 h-6 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" /></div>
 
   const wildcards = patterns.filter((p) => p.type === 'wildcard')
   const regexps   = patterns.filter((p) => p.type === 'regex')
@@ -825,37 +825,37 @@ function PatternsTab() {
         <div><span className="font-mono text-amber-100">/^ads[0-9]+\.com$/</span> — blockiert per regulärem Ausdruck (Go regexp, optional mit <span className="font-mono">/…/</span> Begrenzer)</div>
       </div>
 
-      <div className="bg-[#100c1e] neon-card rounded-2xl overflow-hidden">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-[#2a1f42]">
-          <h3 className="text-sm font-semibold text-[#f0eeff]">{patterns.length} Muster</h3>
+      <div className="bg-[var(--surface-2)] neon-card rounded-2xl overflow-hidden">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border)]">
+          <h3 className="text-sm font-semibold text-[var(--text)]">{patterns.length} Muster</h3>
           <MovingBorderButton onClick={() => setAddOpen(true)}>+ Muster hinzufügen</MovingBorderButton>
         </div>
         {patterns.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 gap-3">
-            <div className="text-sm font-medium text-[#f0eeff]">Keine Muster konfiguriert</div>
+            <div className="text-sm font-medium text-[var(--text)]">Keine Muster konfiguriert</div>
             <MovingBorderButton onClick={() => setAddOpen(true)} className="mt-1">+ Muster hinzufügen</MovingBorderButton>
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-[#2a1f42]">
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[#9a8cbf]">Muster</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[#9a8cbf]">Typ</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[#9a8cbf]">Erstellt</th>
+                <tr className="border-b border-[var(--border)]">
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[var(--muted-2)]">Muster</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[var(--muted-2)]">Typ</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[var(--muted-2)]">Erstellt</th>
                   <th className="px-4 py-3" />
                 </tr>
               </thead>
-              <tbody className="divide-y divide-[#080612]">
+              <tbody className="divide-y divide-[var(--surface)]">
                 {patterns.map((p) => (
-                  <tr key={p.id} className="hover:bg-[#1a1230] transition-colors">
-                    <td className="px-4 py-3 font-mono text-xs text-[#f0eeff]">{p.pattern}</td>
+                  <tr key={p.id} className="hover:bg-[var(--surface-3)] transition-colors">
+                    <td className="px-4 py-3 font-mono text-xs text-[var(--text)]">{p.pattern}</td>
                     <td className="px-4 py-3">
-                      <span className={cn('inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium', p.type === 'wildcard' ? 'bg-purple-500/15 text-purple-300' : 'bg-orange-500/15 text-orange-300')}>
+                      <span className={cn('inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium', p.type === 'wildcard' ? 'bg-amber-500/15 text-amber-300' : 'bg-orange-500/15 text-orange-300')}>
                         {p.type === 'wildcard' ? '✱ Wildcard' : '∕∕ Regex'}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-xs text-[#6b5f8a]">{new Date(p.created_at).toLocaleDateString('de-DE')}</td>
+                    <td className="px-4 py-3 text-xs text-[var(--muted)]">{new Date(p.created_at).toLocaleDateString('de-DE')}</td>
                     <td className="px-4 py-3 text-right">
                       <button onClick={() => handleDelete(p.id, p.pattern)} disabled={deletingId === p.id} className="min-w-[80px] flex items-center justify-center gap-1 ml-auto text-xs text-red-400 hover:text-red-300 disabled:opacity-50 px-2 py-1 rounded border border-red-500/30 transition-colors">
                         {deletingId === p.id ? <><Spinner /> …</> : 'Löschen'}
@@ -871,12 +871,12 @@ function PatternsTab() {
 
       {patterns.length > 0 && (
         <div className="grid grid-cols-2 gap-4 text-xs">
-          <div className="bg-[#100c1e] neon-card rounded-xl px-4 py-3">
-            <div className="text-[#9a8cbf] mb-1">Wildcard-Muster</div>
-            <div className="text-2xl font-bold text-purple-300">{wildcards.length}</div>
+          <div className="bg-[var(--surface-2)] neon-card rounded-xl px-4 py-3">
+            <div className="text-[var(--muted-2)] mb-1">Wildcard-Muster</div>
+            <div className="text-2xl font-bold text-amber-400">{wildcards.length}</div>
           </div>
-          <div className="bg-[#100c1e] neon-card rounded-xl px-4 py-3">
-            <div className="text-[#9a8cbf] mb-1">RegEx-Muster</div>
+          <div className="bg-[var(--surface-2)] neon-card rounded-xl px-4 py-3">
+            <div className="text-[var(--muted-2)] mb-1">RegEx-Muster</div>
             <div className="text-2xl font-bold text-orange-300">{regexps.length}</div>
           </div>
         </div>
@@ -885,24 +885,24 @@ function PatternsTab() {
       <AnimatedModal isOpen={addOpen} onClose={() => setAddOpen(false)} title="Muster hinzufügen">
         <div className="space-y-4">
           <div>
-            <label className="block text-xs font-semibold text-[#9a8cbf] uppercase tracking-wider mb-2">Typ</label>
+            <label className="block text-xs font-semibold text-[var(--muted-2)] uppercase tracking-wider mb-2">Typ</label>
             <div className="flex gap-2">
               {(['wildcard', 'regex'] as const).map((t) => (
-                <button key={t} onClick={() => { setNewType(t); setNewPattern(t === 'wildcard' ? '*.' : '/') }} className={cn('flex-1 py-2 rounded-xl text-sm font-medium border transition-colors', newType === t ? (t === 'wildcard' ? 'bg-purple-500/20 border-purple-500/50 text-purple-300' : 'bg-orange-500/20 border-orange-500/50 text-orange-300') : 'bg-[#080612] border-[#2a1f42] text-[#9a8cbf] hover:text-[#f0eeff]')}>
+                <button key={t} onClick={() => { setNewType(t); setNewPattern(t === 'wildcard' ? '*.' : '/') }} className={cn('flex-1 py-2 rounded-xl text-sm font-medium border transition-colors', newType === t ? (t === 'wildcard' ? 'bg-amber-500/20 border-amber-500/50 text-amber-300' : 'bg-orange-500/20 border-orange-500/50 text-orange-300') : 'bg-[var(--surface)] border-[var(--border)] text-[var(--muted-2)] hover:text-[var(--text)]')}>
                   {t === 'wildcard' ? '✱ Wildcard' : '∕∕ Regex'}
                 </button>
               ))}
             </div>
           </div>
           <div>
-            <label className="block text-xs font-semibold text-[#9a8cbf] uppercase tracking-wider mb-2">Muster</label>
+            <label className="block text-xs font-semibold text-[var(--muted-2)] uppercase tracking-wider mb-2">Muster</label>
             <input value={newPattern} onChange={(e) => setNewPattern(e.target.value)} placeholder={newType === 'wildcard' ? '*.example.com' : '/^ads[0-9]+\\.com$/'} autoFocus className={cn(inputCls, 'font-mono')} />
-            <p className="text-xs text-[#6b5f8a] mt-1.5">
+            <p className="text-xs text-[var(--muted)] mt-1.5">
               {newType === 'wildcard' ? 'Beispiel: *.doubleclick.net blockiert foo.doubleclick.net und doubleclick.net' : 'Beispiel: /^ads[0-9]+\\.example\\.com$/ — Go regexp, / Begrenzer optional'}
             </p>
           </div>
           <div className="flex gap-3 pt-2">
-            <button onClick={() => setAddOpen(false)} disabled={adding} className="flex-1 px-4 py-2 rounded-xl border border-[#2a1f42] text-[#9a8cbf] text-sm hover:text-[#f0eeff] disabled:opacity-50 transition-colors">Abbrechen</button>
+            <button onClick={() => setAddOpen(false)} disabled={adding} className="flex-1 px-4 py-2 rounded-xl border border-[var(--border)] text-[var(--muted-2)] text-sm hover:text-[var(--text)] disabled:opacity-50 transition-colors">Abbrechen</button>
             <MovingBorderButton onClick={handleAdd} disabled={adding || !newPattern.trim()} className="flex-1">
               {adding ? <span className="flex items-center justify-center gap-2"><Spinner /> Speichert …</span> : 'Hinzufügen'}
             </MovingBorderButton>
@@ -981,28 +981,28 @@ function DDNSTab() {
   return (
     <div className="space-y-4 max-w-4xl">
       {/* Key table */}
-      <div className="bg-[#100c1e] neon-card rounded-2xl overflow-hidden">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-[#2a1f42]">
+      <div className="bg-[var(--surface-2)] neon-card rounded-2xl overflow-hidden">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border)]">
           <div>
-            <h3 className="text-sm font-semibold text-[#f0eeff]">TSIG-Schlüssel</h3>
-            <p className="text-xs text-[#6b5f8a] mt-0.5">RFC 2136 — für ISC dhcpd und andere Dynamic-DNS-Clients</p>
+            <h3 className="text-sm font-semibold text-[var(--text)]">TSIG-Schlüssel</h3>
+            <p className="text-xs text-[var(--muted)] mt-0.5">RFC 2136 — für ISC dhcpd und andere Dynamic-DNS-Clients</p>
           </div>
-          <button onClick={() => setShowCreate(true)} className="flex items-center gap-2 px-4 py-2 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium transition-colors">
+          <button onClick={() => setShowCreate(true)} className="flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-500 text-white text-sm font-medium transition-colors">
             <span>+</span> Neuer Schlüssel
           </button>
         </div>
         {loading ? (
-          <div className="px-5 py-10 text-center text-[#6b5f8a] text-sm">Lade …</div>
+          <div className="px-5 py-10 text-center text-[var(--muted)] text-sm">Lade …</div>
         ) : keys.length === 0 ? (
           <div className="px-5 py-10 text-center">
             <div className="text-3xl mb-3">⟳</div>
-            <p className="text-[#6b5f8a] text-sm">Keine Schlüssel vorhanden.</p>
-            <p className="text-[#6b5f8a] text-xs mt-1">Erstelle einen Schlüssel und trage ihn in die dhcpd.conf ein.</p>
+            <p className="text-[var(--muted)] text-sm">Keine Schlüssel vorhanden.</p>
+            <p className="text-[var(--muted)] text-xs mt-1">Erstelle einen Schlüssel und trage ihn in die dhcpd.conf ein.</p>
           </div>
         ) : (
           <table className="w-full text-sm">
             <thead>
-              <tr className="text-xs text-[#9a8cbf] uppercase border-b border-[#2a1f42]">
+              <tr className="text-xs text-[var(--muted-2)] uppercase border-b border-[var(--border)]">
                 <th className="px-5 py-3 text-left font-medium">Name</th>
                 <th className="px-5 py-3 text-left font-medium">Algorithmus</th>
                 <th className="px-5 py-3 text-left font-medium">Erstellt</th>
@@ -1011,10 +1011,10 @@ function DDNSTab() {
             </thead>
             <tbody>
               {keys.map((k) => (
-                <tr key={k.name} className="border-b border-[#2a1f42]/50 last:border-0 hover:bg-white/5 transition-colors">
-                  <td className="px-5 py-3.5 font-mono text-[#f0eeff]">{k.name}</td>
-                  <td className="px-5 py-3.5 text-[#9a8cbf]">{k.algorithm}</td>
-                  <td className="px-5 py-3.5 text-[#6b5f8a]">{fmtKeyDate(k.created_at)}</td>
+                <tr key={k.name} className="border-b border-[var(--border)]/50 last:border-0 hover:bg-white/5 transition-colors">
+                  <td className="px-5 py-3.5 font-mono text-[var(--text)]">{k.name}</td>
+                  <td className="px-5 py-3.5 text-[var(--muted-2)]">{k.algorithm}</td>
+                  <td className="px-5 py-3.5 text-[var(--muted)]">{fmtKeyDate(k.created_at)}</td>
                   <td className="px-5 py-3.5 text-right">
                     <button onClick={() => setDeleteTarget(k.name)} className="text-xs text-red-400 hover:text-red-300 hover:bg-red-900/20 px-2 py-1 rounded-lg transition-colors">Löschen</button>
                   </td>
@@ -1026,13 +1026,13 @@ function DDNSTab() {
       </div>
 
       {/* dhcpd example */}
-      <div className="bg-[#100c1e] neon-card rounded-2xl overflow-hidden">
-        <div className="px-5 py-4 border-b border-[#2a1f42]">
-          <h3 className="text-sm font-semibold text-[#f0eeff]">ISC dhcpd Konfigurationsbeispiel</h3>
-          <p className="text-xs text-[#6b5f8a] mt-0.5">Füge diese Konfiguration in <code className="text-violet-400">/etc/dhcp/dhcpd.conf</code> ein.</p>
+      <div className="bg-[var(--surface-2)] neon-card rounded-2xl overflow-hidden">
+        <div className="px-5 py-4 border-b border-[var(--border)]">
+          <h3 className="text-sm font-semibold text-[var(--text)]">ISC dhcpd Konfigurationsbeispiel</h3>
+          <p className="text-xs text-[var(--muted)] mt-0.5">Füge diese Konfiguration in <code className="text-amber-400">/etc/dhcp/dhcpd.conf</code> ein.</p>
         </div>
         <div className="px-5 py-4">
-          <pre className="bg-[#080612] text-[#9a8cbf] rounded-xl px-4 py-4 text-xs font-mono border border-[#2a1f42] overflow-x-auto leading-relaxed">{`# DDNS-Konfiguration aktivieren
+          <pre className="bg-[var(--surface)] text-[var(--muted-2)] rounded-xl px-4 py-4 text-xs font-mono border border-[var(--border)] overflow-x-auto leading-relaxed">{`# DDNS-Konfiguration aktivieren
 ddns-updates on;
 ddns-update-style interim;
 update-static-leases on;
@@ -1066,12 +1066,12 @@ zone 100.168.192.in-addr.arpa. {
       <AnimatedModal isOpen={showCreate} onClose={() => { setShowCreate(false); setCreateError(''); setCreateName('') }} title="Neuen TSIG-Schlüssel erstellen">
         <form onSubmit={handleCreate} className="space-y-4">
           <div>
-            <label className="block text-xs font-semibold text-[#9a8cbf] uppercase tracking-wider mb-2">Name</label>
+            <label className="block text-xs font-semibold text-[var(--muted-2)] uppercase tracking-wider mb-2">Name</label>
             <input type="text" value={createName} onChange={(e) => setCreateName(e.target.value)} placeholder="z.B. dhcp-dns" autoFocus className={inputCls} />
-            <p className="text-xs text-[#6b5f8a] mt-1">Muss mit dem Schlüsselnamen in der dhcpd.conf übereinstimmen.</p>
+            <p className="text-xs text-[var(--muted)] mt-1">Muss mit dem Schlüsselnamen in der dhcpd.conf übereinstimmen.</p>
           </div>
           <div>
-            <label className="block text-xs font-semibold text-[#9a8cbf] uppercase tracking-wider mb-2">Algorithmus</label>
+            <label className="block text-xs font-semibold text-[var(--muted-2)] uppercase tracking-wider mb-2">Algorithmus</label>
             <select value={createAlgorithm} onChange={(e) => setCreateAlgorithm(e.target.value)} className={inputCls}>
               <option value="hmac-sha256">HMAC-SHA256 (empfohlen)</option>
               <option value="hmac-sha512">HMAC-SHA512</option>
@@ -1080,7 +1080,7 @@ zone 100.168.192.in-addr.arpa. {
           </div>
           {createError && <p className="text-sm text-red-400 bg-red-900/20 border border-red-800/30 rounded-lg px-3 py-2">{createError}</p>}
           <div className="flex gap-3 pt-2">
-            <button type="button" onClick={() => { setShowCreate(false); setCreateError(''); setCreateName('') }} className="flex-1 px-4 py-2 rounded-xl border border-[#2a1f42] text-[#9a8cbf] text-sm hover:text-[#f0eeff] transition-colors">Abbrechen</button>
+            <button type="button" onClick={() => { setShowCreate(false); setCreateError(''); setCreateName('') }} className="flex-1 px-4 py-2 rounded-xl border border-[var(--border)] text-[var(--muted-2)] text-sm hover:text-[var(--text)] transition-colors">Abbrechen</button>
             <MovingBorderButton type="submit" disabled={creating} className="flex-1">
               {creating ? 'Erstellen …' : 'Erstellen'}
             </MovingBorderButton>
@@ -1091,32 +1091,32 @@ zone 100.168.192.in-addr.arpa. {
       {/* Secret display */}
       {newKey && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-          <div className="bg-[#100c1e] neon-card rounded-2xl w-full max-w-xl shadow-2xl">
-            <div className="px-6 py-5 border-b border-[#2a1f42]">
-              <h2 className="text-lg font-semibold text-[#f0eeff]">TSIG-Schlüssel erstellt</h2>
+          <div className="bg-[var(--surface-2)] neon-card rounded-2xl w-full max-w-xl shadow-2xl">
+            <div className="px-6 py-5 border-b border-[var(--border)]">
+              <h2 className="text-lg font-semibold text-[var(--text)]">TSIG-Schlüssel erstellt</h2>
               <p className="text-sm text-amber-400 mt-1 flex items-center gap-2"><span>⚠</span> Dieser Secret wird nur einmalig angezeigt — bitte jetzt sichern!</p>
             </div>
             <div className="px-6 py-5 space-y-4">
               <div className="grid grid-cols-2 gap-3 text-sm">
-                <div><div className="text-[#6b5f8a] mb-1">Name</div><div className="text-[#f0eeff] font-mono">{newKey.name}</div></div>
-                <div><div className="text-[#6b5f8a] mb-1">Algorithmus</div><div className="text-[#f0eeff] font-mono">{newKey.algorithm}</div></div>
+                <div><div className="text-[var(--muted)] mb-1">Name</div><div className="text-[var(--text)] font-mono">{newKey.name}</div></div>
+                <div><div className="text-[var(--muted)] mb-1">Algorithmus</div><div className="text-[var(--text)] font-mono">{newKey.algorithm}</div></div>
               </div>
               <div>
-                <div className="text-[#6b5f8a] text-sm mb-1">Secret (Base64)</div>
+                <div className="text-[var(--muted)] text-sm mb-1">Secret (Base64)</div>
                 <div className="flex items-center gap-2">
-                  <code className="flex-1 bg-[#080612] text-green-400 rounded-lg px-3 py-2 text-xs font-mono break-all border border-[#2a1f42]">{newKey.secret}</code>
-                  <button onClick={handleCopySecret} className="shrink-0 px-3 py-2 rounded-lg bg-[#2a1f42] hover:bg-[#6b5f8a] text-[#9a8cbf] text-xs transition-colors">
+                  <code className="flex-1 bg-[var(--surface)] text-green-400 rounded-lg px-3 py-2 text-xs font-mono break-all border border-[var(--border)]">{newKey.secret}</code>
+                  <button onClick={handleCopySecret} className="shrink-0 px-3 py-2 rounded-lg bg-[var(--border)] hover:bg-[#5A5A6E] text-[var(--muted-2)] text-xs transition-colors">
                     {copied ? '✓' : 'Kopieren'}
                   </button>
                 </div>
               </div>
               <div>
-                <div className="text-[#6b5f8a] text-sm mb-1">ISC dhcpd Konfiguration</div>
-                <pre className="bg-[#080612] text-[#9a8cbf] rounded-lg px-3 py-3 text-xs font-mono border border-[#2a1f42] overflow-x-auto whitespace-pre-wrap">{`key ${newKey.name} {\n  algorithm ${newKey.algorithm};\n  secret "${newKey.secret}";\n}\n\nzone home. {\n  primary 192.0.2.1;\n  key ${newKey.name};\n}`}</pre>
+                <div className="text-[var(--muted)] text-sm mb-1">ISC dhcpd Konfiguration</div>
+                <pre className="bg-[var(--surface)] text-[var(--muted-2)] rounded-lg px-3 py-3 text-xs font-mono border border-[var(--border)] overflow-x-auto whitespace-pre-wrap">{`key ${newKey.name} {\n  algorithm ${newKey.algorithm};\n  secret "${newKey.secret}";\n}\n\nzone home. {\n  primary 192.0.2.1;\n  key ${newKey.name};\n}`}</pre>
               </div>
             </div>
             <div className="px-6 pb-5">
-              <button onClick={() => setNewKey(null)} className="w-full px-4 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium transition-colors">Verstanden, Secret gesichert</button>
+              <button onClick={() => setNewKey(null)} className="w-full px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-500 text-white text-sm font-medium transition-colors">Verstanden, Secret gesichert</button>
             </div>
           </div>
         </div>
@@ -1125,11 +1125,11 @@ zone 100.168.192.in-addr.arpa. {
       {/* Delete confirmation */}
       <AnimatedModal isOpen={!!deleteTarget} onClose={() => setDeleteTarget(null)} title="Schlüssel löschen?">
         <div className="space-y-4">
-          <p className="text-sm text-[#9a8cbf]">
-            Der TSIG-Schlüssel <span className="font-mono text-[#f0eeff]">&quot;{deleteTarget}&quot;</span> wird dauerhaft gelöscht. Clients, die diesen Schlüssel verwenden, können keine DNS-Updates mehr senden.
+          <p className="text-sm text-[var(--muted-2)]">
+            Der TSIG-Schlüssel <span className="font-mono text-[var(--text)]">&quot;{deleteTarget}&quot;</span> wird dauerhaft gelöscht. Clients, die diesen Schlüssel verwenden, können keine DNS-Updates mehr senden.
           </p>
           <div className="flex gap-3 pt-2">
-            <button onClick={() => setDeleteTarget(null)} className="flex-1 px-4 py-2 rounded-xl border border-[#2a1f42] text-[#9a8cbf] text-sm hover:text-[#f0eeff] transition-colors">Abbrechen</button>
+            <button onClick={() => setDeleteTarget(null)} className="flex-1 px-4 py-2 rounded-xl border border-[var(--border)] text-[var(--muted-2)] text-sm hover:text-[var(--text)] transition-colors">Abbrechen</button>
             <button onClick={handleDeleteConfirm} className="flex-1 px-4 py-2.5 rounded-xl bg-red-700 hover:bg-red-600 text-white text-sm font-medium transition-colors">Löschen</button>
           </div>
         </div>
@@ -1180,7 +1180,7 @@ function SplitHorizonTab() {
     save({ ...shConfig, views: (shConfig.views ?? []).filter((_, i) => i !== idx) })
   }
 
-  if (loading) return <div className="flex items-center justify-center h-32"><div className="w-6 h-6 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" /></div>
+  if (loading) return <div className="flex items-center justify-center h-32"><div className="w-6 h-6 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" /></div>
 
   return (
     <div className="space-y-4 max-w-2xl">
@@ -1194,21 +1194,21 @@ function SplitHorizonTab() {
         {(shConfig.views ?? []).length > 0 && (
           <div className="space-y-2">
             {(shConfig.views ?? []).map((view, idx) => (
-              <div key={idx} className="flex items-start justify-between gap-3 p-3 rounded-xl bg-[#080612] border border-[#2a1f42]">
+              <div key={idx} className="flex items-start justify-between gap-3 p-3 rounded-xl bg-[var(--surface)] border border-[var(--border)]">
                 <div>
-                  <div className="text-sm font-medium text-violet-400">{view.name}</div>
-                  <div className="text-xs text-[#6b5f8a] mt-0.5">{view.subnets.length > 0 ? view.subnets.join(', ') : 'catch-all (alle anderen)'}</div>
+                  <div className="text-sm font-medium text-amber-400">{view.name}</div>
+                  <div className="text-xs text-[var(--muted)] mt-0.5">{view.subnets.length > 0 ? view.subnets.join(', ') : 'catch-all (alle anderen)'}</div>
                 </div>
                 <button onClick={() => removeView(idx)} disabled={saving} className="text-xs text-red-400 hover:text-red-300 disabled:opacity-50 px-2 py-1 rounded border border-red-500/30 hover:border-red-400/50 transition-colors shrink-0">Entfernen</button>
               </div>
             ))}
           </div>
         )}
-        <div className="space-y-3 pt-1 border-t border-[#2a1f42]">
-          <p className="text-xs font-semibold text-[#9a8cbf] uppercase tracking-wider pt-1">View hinzufügen</p>
+        <div className="space-y-3 pt-1 border-t border-[var(--border)]">
+          <p className="text-xs font-semibold text-[var(--muted-2)] uppercase tracking-wider pt-1">View hinzufügen</p>
           <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Name (z.B. internal)" className={inputCls} />
           <input value={newSubnets} onChange={(e) => setNewSubnets(e.target.value)} placeholder="Subnetze, kommagetrennt (leer = catch-all)" className={inputCls} />
-          <p className="text-xs text-[#6b5f8a]">z.B. 192.168.0.0/16, 10.0.0.0/8 — leer für catch-all</p>
+          <p className="text-xs text-[var(--muted)]">z.B. 192.168.0.0/16, 10.0.0.0/8 — leer für catch-all</p>
           <MovingBorderButton onClick={addView} disabled={saving || !newName.trim()} className="w-full">View hinzufügen</MovingBorderButton>
         </div>
       </Card>
@@ -1261,34 +1261,34 @@ function ZoneTransferTab({ cfg, onSaved }: { cfg: Config; onSaved: () => void })
           <ToggleSwitch checked={axfrConfig.enabled} onChange={(v) => save({ ...axfrConfig, enabled: v })} disabled={saving} />
         }
       >
-        <p className="text-xs text-[#6b5f8a]">
+        <p className="text-xs text-[var(--muted)]">
           Erlaubte Client-IPs/CIDRs für DNS Zone Transfer. Leer = alle Anfragen ablehnen. Nur über TCP.
         </p>
 
         {(axfrConfig.allowed_ips ?? []).length > 0 && (
           <div className="space-y-2">
             {(axfrConfig.allowed_ips ?? []).map((ip, idx) => (
-              <div key={idx} className="flex items-center justify-between gap-3 p-3 rounded-xl bg-[#080612] border border-[#2a1f42]">
-                <span className="text-sm font-mono text-violet-300">{ip}</span>
+              <div key={idx} className="flex items-center justify-between gap-3 p-3 rounded-xl bg-[var(--surface)] border border-[var(--border)]">
+                <span className="text-sm font-mono text-amber-400">{ip}</span>
                 <button onClick={() => removeIP(idx)} disabled={saving} className="text-xs text-red-400 hover:text-red-300 disabled:opacity-50 px-2 py-1 rounded border border-red-500/30 hover:border-red-400/50 transition-colors shrink-0">Entfernen</button>
               </div>
             ))}
           </div>
         )}
 
-        <div className="space-y-2 border-t border-[#2a1f42] pt-3">
-          <p className="text-xs font-semibold text-[#9a8cbf] uppercase tracking-wider">IP/CIDR hinzufügen</p>
+        <div className="space-y-2 border-t border-[var(--border)] pt-3">
+          <p className="text-xs font-semibold text-[var(--muted-2)] uppercase tracking-wider">IP/CIDR hinzufügen</p>
           <div className="flex gap-2">
             <input
               value={newIP}
               onChange={(e) => setNewIP(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addIP())}
               placeholder="z.B. 192.168.0.0/16 oder 10.0.0.1"
-              className="flex-1 px-3 py-2 rounded-xl bg-[#080612] border border-[#2a1f42] text-[#f0eeff] text-sm focus:outline-none focus:border-violet-500 transition-colors"
+              className="flex-1 px-3 py-2 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] text-sm focus:outline-none focus:border-amber-500 transition-colors"
             />
-            <button onClick={addIP} disabled={saving || !newIP.trim()} className="px-4 py-2 rounded-xl bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-sm text-white transition-colors">Hinzufügen</button>
+            <button onClick={addIP} disabled={saving || !newIP.trim()} className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-500 disabled:opacity-50 text-sm text-white transition-colors">Hinzufügen</button>
           </div>
-          <p className="text-xs text-[#6b5f8a]">CIDR-Notation empfohlen: 192.168.0.0/16, 127.0.0.1/32</p>
+          <p className="text-xs text-[var(--muted)]">CIDR-Notation empfohlen: 192.168.0.0/16, 127.0.0.1/32</p>
         </div>
       </Card>
     </div>
@@ -1379,52 +1379,52 @@ function DHCPSyncTab({ cfg }: { cfg: Config }) {
     <div className="space-y-4">
       <Card title="DHCP-Lease-Sync" subtitle="Automatische A- und PTR-Records aus DHCP-Leases (nur lesend, Konfiguration via config.yaml)">
         {!dhcp || !dhcp.enabled ? (
-          <div className="text-[#6b5f8a] text-sm py-4">
-            DHCP-Lease-Sync ist nicht aktiviert. Aktiviere das Feature in der <code className="bg-[#080612] px-1.5 py-0.5 rounded text-violet-400">config.yaml</code> unter <code className="bg-[#080612] px-1.5 py-0.5 rounded text-violet-400">dhcp_lease_sync.enabled: true</code>
+          <div className="text-[var(--muted)] text-sm py-4">
+            DHCP-Lease-Sync ist nicht aktiviert. Aktiviere das Feature in der <code className="bg-[var(--surface)] px-1.5 py-0.5 rounded text-amber-400">config.yaml</code> unter <code className="bg-[var(--surface)] px-1.5 py-0.5 rounded text-amber-400">dhcp_lease_sync.enabled: true</code>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className={labelCls}>Quelle</label>
-              <div className="text-[#f0eeff] text-sm">{sourceLabels[dhcp.source ?? ''] ?? dhcp.source ?? '—'}</div>
+              <div className="text-[var(--text)] text-sm">{sourceLabels[dhcp.source ?? ''] ?? dhcp.source ?? '—'}</div>
             </div>
             {dhcp.source !== 'fritzbox' && (
               <div>
                 <label className={labelCls}>Quelldatei</label>
-                <div className="text-[#f0eeff] text-sm font-mono">{dhcp.source_path ?? '—'}</div>
+                <div className="text-[var(--text)] text-sm font-mono">{dhcp.source_path ?? '—'}</div>
               </div>
             )}
             {dhcp.source === 'fritzbox' && (
               <>
                 <div>
                   <label className={labelCls}>FritzBox URL</label>
-                  <div className="text-[#f0eeff] text-sm font-mono">{dhcp.fritzbox_url ?? '—'}</div>
+                  <div className="text-[var(--text)] text-sm font-mono">{dhcp.fritzbox_url ?? '—'}</div>
                 </div>
                 <div>
                   <label className={labelCls}>FritzBox Benutzer</label>
-                  <div className="text-[#f0eeff] text-sm">{dhcp.fritzbox_user ?? '—'}</div>
+                  <div className="text-[var(--text)] text-sm">{dhcp.fritzbox_user ?? '—'}</div>
                 </div>
               </>
             )}
             <div>
               <label className={labelCls}>Forward-Zone</label>
-              <div className="text-[#f0eeff] text-sm">{dhcp.zone ?? '—'}</div>
+              <div className="text-[var(--text)] text-sm">{dhcp.zone ?? '—'}</div>
             </div>
             <div>
               <label className={labelCls}>Reverse-Zone</label>
-              <div className="text-[#f0eeff] text-sm">{dhcp.reverse_zone || 'Automatisch'}</div>
+              <div className="text-[var(--text)] text-sm">{dhcp.reverse_zone || 'Automatisch'}</div>
             </div>
             <div>
               <label className={labelCls}>TTL</label>
-              <div className="text-[#f0eeff] text-sm">{dhcp.ttl ?? 60}s</div>
+              <div className="text-[var(--text)] text-sm">{dhcp.ttl ?? 60}s</div>
             </div>
             <div>
               <label className={labelCls}>Abfrage-Intervall</label>
-              <div className="text-[#f0eeff] text-sm">{dhcp.poll_interval ?? '30s'}</div>
+              <div className="text-[var(--text)] text-sm">{dhcp.poll_interval ?? '30s'}</div>
             </div>
             <div>
               <label className={labelCls}>Zonen automatisch erstellen</label>
-              <div className="text-[#f0eeff] text-sm">{dhcp.auto_create_zone ? 'Ja' : 'Nein'}</div>
+              <div className="text-[var(--text)] text-sm">{dhcp.auto_create_zone ? 'Ja' : 'Nein'}</div>
             </div>
           </div>
         )}
@@ -1531,15 +1531,15 @@ function SecurityTab() {
     <div className="space-y-4 max-w-2xl">
       <Card title="Zugangsdaten">
         <div>
-          <div className="text-sm font-medium text-[#f0eeff] mb-1">Passwort ändern</div>
-          <div className="text-xs text-[#6b5f8a] mb-3">Neues Login-Passwort für das Web-Interface</div>
-          <button onClick={() => setPwOpen(true)} className="px-4 py-2 rounded-xl bg-[#080612] border border-[#2a1f42] text-sm text-[#9a8cbf] hover:text-[#f0eeff] hover:border-[#6b5f8a] transition-colors">
+          <div className="text-sm font-medium text-[var(--text)] mb-1">Passwort ändern</div>
+          <div className="text-xs text-[var(--muted)] mb-3">Neues Login-Passwort für das Web-Interface</div>
+          <button onClick={() => setPwOpen(true)} className="px-4 py-2 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-sm text-[var(--muted-2)] hover:text-[var(--text)] hover:border-[var(--muted)] transition-colors">
             Passwort ändern …
           </button>
         </div>
-        <div className="border-t border-[#2a1f42] pt-4">
-          <div className="text-sm font-medium text-[#f0eeff] mb-1">Root-API-Key</div>
-          <div className="text-xs text-[#6b5f8a] mb-3">Haupt-Key für programmatischen Zugriff via Bearer Token (curl, Scripts)</div>
+        <div className="border-t border-[var(--border)] pt-4">
+          <div className="text-sm font-medium text-[var(--text)] mb-1">Root-API-Key</div>
+          <div className="text-xs text-[var(--muted)] mb-3">Haupt-Key für programmatischen Zugriff via Bearer Token (curl, Scripts)</div>
           <button onClick={() => setKeyOpen(true)} className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500/20 to-red-500/20 border border-amber-500/30 text-sm text-amber-400 hover:text-amber-300 transition-colors">
             Neuen Root-Key generieren …
           </button>
@@ -1548,21 +1548,21 @@ function SecurityTab() {
 
       {/* Named API Keys */}
       <Card title="API-Schlüssel">
-        <div className="text-xs text-[#6b5f8a] mb-4">
+        <div className="text-xs text-[var(--muted)] mb-4">
           Dedizierte Keys für externe Tools (Traefik, Certbot, acme.sh, Proxmox). Jeder Key kann einzeln widerrufen werden.
         </div>
         {namedKeysLoading ? (
-          <div className="flex items-center gap-2 text-xs text-[#6b5f8a]"><Spinner /> Laden …</div>
+          <div className="flex items-center gap-2 text-xs text-[var(--muted)]"><Spinner /> Laden …</div>
         ) : namedKeys.length === 0 ? (
-          <div className="text-xs text-[#6b5f8a] italic mb-3">Noch keine API-Schlüssel erstellt.</div>
+          <div className="text-xs text-[var(--muted)] italic mb-3">Noch keine API-Schlüssel erstellt.</div>
         ) : (
           <div className="space-y-2 mb-4">
             {namedKeys.map((k) => (
-              <div key={k.id} className="flex items-center gap-3 p-3 rounded-xl bg-[#080612] border border-[#2a1f42]">
+              <div key={k.id} className="flex items-center gap-3 p-3 rounded-xl bg-[var(--surface)] border border-[var(--border)]">
                 <div className="flex-1 min-w-0">
-                  <div className="text-sm font-medium text-[#f0eeff] truncate">{k.name}</div>
-                  {k.description && <div className="text-xs text-[#6b5f8a] truncate">{k.description}</div>}
-                  <div className="text-xs text-[#4a3f6a] mt-0.5">Erstellt: {new Date(k.created_at).toLocaleDateString('de-DE', { dateStyle: 'medium' })}</div>
+                  <div className="text-sm font-medium text-[var(--text)] truncate">{k.name}</div>
+                  {k.description && <div className="text-xs text-[var(--muted)] truncate">{k.description}</div>}
+                  <div className="text-xs text-[#5A5A6E] mt-0.5">Erstellt: {new Date(k.created_at).toLocaleDateString('de-DE', { dateStyle: 'medium' })}</div>
                 </div>
                 <button
                   onClick={() => handleDeleteNamedKey(k.id, k.name)}
@@ -1577,7 +1577,7 @@ function SecurityTab() {
         )}
         <button
           onClick={() => setNewNamedKeyOpen(true)}
-          className="px-4 py-2 rounded-xl bg-violet-600/20 border border-violet-500/30 text-sm text-violet-400 hover:text-violet-300 hover:border-violet-400/50 transition-colors"
+          className="px-4 py-2 rounded-xl bg-amber-500/10 border border-amber-500/30 text-sm text-amber-400 hover:text-amber-400 hover:border-amber-500/30 transition-colors"
         >
           + Neuer API-Schlüssel
         </button>
@@ -1594,7 +1594,7 @@ function SecurityTab() {
             <input type="password" value={newPw} onChange={(e) => setNewPw(e.target.value)} className={inputCls} />
           </div>
           <div className="flex gap-3 pt-2">
-            <button onClick={() => setPwOpen(false)} disabled={changingPassword} className="flex-1 px-4 py-2 rounded-xl border border-[#2a1f42] text-[#9a8cbf] text-sm hover:text-[#f0eeff] disabled:opacity-50 transition-colors">Abbrechen</button>
+            <button onClick={() => setPwOpen(false)} disabled={changingPassword} className="flex-1 px-4 py-2 rounded-xl border border-[var(--border)] text-[var(--muted-2)] text-sm hover:text-[var(--text)] disabled:opacity-50 transition-colors">Abbrechen</button>
             <MovingBorderButton onClick={handleChangePassword} disabled={changingPassword} className="flex-1">
               {changingPassword ? <span className="flex items-center justify-center gap-2"><Spinner /> Speichert …</span> : 'Passwort ändern'}
             </MovingBorderButton>
@@ -1604,10 +1604,10 @@ function SecurityTab() {
 
       <AnimatedModal isOpen={keyOpen && !newKey} onClose={() => setKeyOpen(false)} title="Root-API-Key regenerieren">
         <div className="space-y-4">
-          <p className="text-sm text-[#9a8cbf]">Der aktuelle Root-Key wird sofort ungültig. Alle Scripts/Tools müssen den neuen Key verwenden.</p>
+          <p className="text-sm text-[var(--muted-2)]">Der aktuelle Root-Key wird sofort ungültig. Alle Scripts/Tools müssen den neuen Key verwenden.</p>
           <p className="text-sm font-semibold text-amber-400">Der neue Key wird nur einmalig angezeigt!</p>
           <div className="flex gap-3 pt-2">
-            <button onClick={() => setKeyOpen(false)} disabled={generatingKey} className="flex-1 px-4 py-2 rounded-xl border border-[#2a1f42] text-[#9a8cbf] text-sm hover:text-[#f0eeff] disabled:opacity-50 transition-colors">Abbrechen</button>
+            <button onClick={() => setKeyOpen(false)} disabled={generatingKey} className="flex-1 px-4 py-2 rounded-xl border border-[var(--border)] text-[var(--muted-2)] text-sm hover:text-[var(--text)] disabled:opacity-50 transition-colors">Abbrechen</button>
             <button onClick={handleRegenKey} disabled={generatingKey} className="flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-red-500 text-white text-sm font-semibold hover:opacity-90 disabled:opacity-60 transition-opacity">
               {generatingKey ? <><Spinner /> Generiert …</> : 'Neuen Key generieren'}
             </button>
@@ -1618,8 +1618,8 @@ function SecurityTab() {
       <AnimatedModal isOpen={!!newKey} onClose={() => { setNewKey(''); setKeyOpen(false) }} title="">
         <div className="space-y-4">
           <h3 className="text-lg font-bold text-green-400">✓ Neuer Root-API-Key generiert</h3>
-          <p className="text-sm text-[#9a8cbf]">Bitte jetzt kopieren – wird nicht erneut angezeigt:</p>
-          <div className="bg-[#080612] neon-card rounded-xl p-4 font-mono text-sm text-violet-300 break-all">{newKey}</div>
+          <p className="text-sm text-[var(--muted-2)]">Bitte jetzt kopieren – wird nicht erneut angezeigt:</p>
+          <div className="bg-[var(--surface)] neon-card rounded-xl p-4 font-mono text-sm text-amber-400 break-all">{newKey}</div>
           <div className="flex items-center gap-2 px-4 py-3 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-300 text-xs">
             <span>⚠</span> Dieser Key wird nicht erneut angezeigt. Jetzt kopieren!
           </div>
@@ -1656,7 +1656,7 @@ function SecurityTab() {
             <button
               onClick={() => { setNewNamedKeyOpen(false); setNewNamedKeyName(''); setNewNamedKeyDesc('') }}
               disabled={creatingNamedKey}
-              className="flex-1 px-4 py-2 rounded-xl border border-[#2a1f42] text-[#9a8cbf] text-sm hover:text-[#f0eeff] disabled:opacity-50 transition-colors"
+              className="flex-1 px-4 py-2 rounded-xl border border-[var(--border)] text-[var(--muted-2)] text-sm hover:text-[var(--text)] disabled:opacity-50 transition-colors"
             >
               Abbrechen
             </button>
@@ -1672,16 +1672,16 @@ function SecurityTab() {
         <div className="space-y-4">
           <h3 className="text-lg font-bold text-green-400">✓ API-Schlüssel erstellt</h3>
           <div>
-            <div className="text-sm font-medium text-[#f0eeff] mb-1">{createdKey?.name}</div>
-            {createdKey?.description && <div className="text-xs text-[#6b5f8a]">{createdKey.description}</div>}
+            <div className="text-sm font-medium text-[var(--text)] mb-1">{createdKey?.name}</div>
+            {createdKey?.description && <div className="text-xs text-[var(--muted)]">{createdKey.description}</div>}
           </div>
-          <p className="text-sm text-[#9a8cbf]">Bitte jetzt kopieren – wird nicht erneut angezeigt:</p>
-          <div className="bg-[#080612] neon-card rounded-xl p-4 font-mono text-sm text-violet-300 break-all">
+          <p className="text-sm text-[var(--muted-2)]">Bitte jetzt kopieren – wird nicht erneut angezeigt:</p>
+          <div className="bg-[var(--surface)] neon-card rounded-xl p-4 font-mono text-sm text-amber-400 break-all">
             {createdKey?.key}
           </div>
           <button
             onClick={handleCopyKey}
-            className="w-full py-2 rounded-xl bg-violet-600/20 border border-violet-500/30 text-sm text-violet-400 hover:text-violet-300 transition-colors"
+            className="w-full py-2 rounded-xl bg-amber-500/10 border border-amber-500/30 text-sm text-amber-400 hover:text-amber-400 transition-colors"
           >
             {copied ? '✓ Kopiert!' : 'Key kopieren'}
           </button>
@@ -1719,7 +1719,7 @@ export default function SettingsPage() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="w-6 h-6 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" />
+        <div className="w-6 h-6 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
       </div>
     )
   }
@@ -1731,7 +1731,7 @@ export default function SettingsPage() {
 
         {/* Tab bar */}
         <div className="overflow-x-auto pb-1 -mx-4 px-4 lg:mx-0 lg:px-0">
-          <div className="flex gap-1 bg-[#100c1e] neon-card rounded-xl p-1 w-max min-w-full lg:w-auto lg:min-w-0">
+          <div className="flex gap-1 bg-[var(--surface-2)] neon-card rounded-xl p-1 w-max min-w-full lg:w-auto lg:min-w-0">
             {MAIN_TABS.map((t) => (
               <button
                 key={t.key}
@@ -1739,8 +1739,8 @@ export default function SettingsPage() {
                 className={cn(
                   'whitespace-nowrap px-3 py-2 rounded-lg text-sm font-medium transition-all',
                   activeTab === t.key
-                    ? 'bg-violet-500/20 text-violet-400'
-                    : 'text-[#9a8cbf] hover:text-[#f0eeff]'
+                    ? 'bg-amber-500/10 text-amber-400'
+                    : 'text-[var(--muted-2)] hover:text-[var(--text)]'
                 )}
               >
                 {t.label}

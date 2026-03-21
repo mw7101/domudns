@@ -51,17 +51,17 @@ export function AnimatedModal({ isOpen, onClose, children, title, className }: A
             exit={{ opacity: 0, scale: 0.95, y: 8 }}
             transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
             className={cn(
-              'relative w-full max-w-md rounded-2xl border border-[#2a1f42] bg-[#100c1e] shadow-2xl',
+              'relative w-full max-w-md rounded-2xl border border-[var(--border)] bg-[var(--surface-2)] shadow-2xl',
               'p-6',
               className
             )}
           >
             {title && (
-              <h3 className="text-lg font-semibold text-[#f0eeff] mb-5">{title}</h3>
+              <h3 className="text-lg font-semibold text-[var(--text)] mb-5">{title}</h3>
             )}
             <button
               onClick={onClose}
-              className="absolute top-4 right-4 text-[#6b5f8a] hover:text-[#9a8cbf] transition-colors text-xl leading-none"
+              className="absolute top-4 right-4 text-[var(--muted)] hover:text-[var(--muted-2)] transition-colors text-xl leading-none"
               aria-label="Schließen"
             >
               ×

@@ -18,10 +18,10 @@ interface KpiCardProps {
 
 const variantBorder: Record<KpiVariant, string> = {
   default: '',
-  success: 'border-green-500/40',
-  error: 'border-red-500/40',
-  warning: 'border-amber-500/40',
-  accent: 'border-violet-500/40',
+  success: 'border-green-500/30',
+  error: 'border-red-500/30',
+  warning: 'border-amber-500/30',
+  accent: 'border-amber-500/20',
 }
 
 const labelStyles: Record<KpiVariant, string> = {
@@ -29,7 +29,7 @@ const labelStyles: Record<KpiVariant, string> = {
   success: 'text-green-400',
   error: 'text-red-400',
   warning: 'text-amber-400',
-  accent: 'text-violet-400',
+  accent: 'text-amber-400',
 }
 
 export function KpiCard({ label, value, hint, info, variant = 'default', gradient = false }: KpiCardProps) {
@@ -38,7 +38,7 @@ export function KpiCard({ label, value, hint, info, variant = 'default', gradien
       className={cn(
         'p-5',
         !gradient && [
-          'rounded-2xl bg-[#100c1e] neon-card',
+          'rounded-2xl bg-[var(--surface-2)] neon-card',
           variant !== 'default' && variantBorder[variant],
         ]
       )}

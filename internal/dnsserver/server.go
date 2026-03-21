@@ -168,6 +168,11 @@ func (s *Server) GetZones() *ZoneManager {
 	return s.zones
 }
 
+// GetCache returns the CacheManager, or nil if cache is disabled.
+func (s *Server) GetCache() *CacheManager {
+	return s.cache
+}
+
 // UpdateTSIGKeys updates TSIG keys at runtime (implements api.DDNSKeyUpdater).
 func (s *Server) UpdateTSIGKeys(keys []store.TSIGKey) {
 	if s.handler.ddns != nil {

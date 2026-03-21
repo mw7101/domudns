@@ -29,39 +29,39 @@ function DDNSStatusCards({ status, keys }: { status: DDNSStatus | null; keys: TS
   return (
     <>
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
-        <div className="bg-[#100c1e] neon-card rounded-xl p-4">
-          <div className="text-xs text-[#6b5f8a] mb-1">TSIG-Keys</div>
-          <div className={`text-2xl font-semibold ${noKeys ? 'text-yellow-400' : 'text-[#f0eeff]'}`}>
+        <div className="bg-[var(--surface-2)] neon-card rounded-xl p-4">
+          <div className="text-xs text-[var(--muted)] mb-1">TSIG-Keys</div>
+          <div className={`text-2xl font-semibold ${noKeys ? 'text-yellow-400' : 'text-[var(--text)]'}`}>
             {status?.key_count ?? '—'}
           </div>
           {noKeys && <div className="text-xs text-yellow-400/70 mt-0.5">Kein Key — Updates werden abgelehnt</div>}
         </div>
-        <div className="bg-[#100c1e] neon-card rounded-xl p-4">
-          <div className="text-xs text-[#6b5f8a] mb-1">Erfolgreiche Updates</div>
-          <div className="text-2xl font-semibold text-[#f0eeff]">
+        <div className="bg-[var(--surface-2)] neon-card rounded-xl p-4">
+          <div className="text-xs text-[var(--muted)] mb-1">Erfolgreiche Updates</div>
+          <div className="text-2xl font-semibold text-[var(--text)]">
             {status?.total_updates?.toLocaleString('de-DE') ?? '—'}
           </div>
-          <div className="text-xs text-[#6b5f8a] mt-0.5">
+          <div className="text-xs text-[var(--muted)] mt-0.5">
             {status?.last_update_at ? `Zuletzt: ${fmtTime(status.last_update_at)}` : 'Noch keines'}
           </div>
         </div>
-        <div className="bg-[#100c1e] neon-card rounded-xl p-4">
-          <div className="text-xs text-[#6b5f8a] mb-1">Abgelehnte Updates</div>
-          <div className={`text-2xl font-semibold ${hasFailures ? 'text-red-400' : 'text-[#f0eeff]'}`}>
+        <div className="bg-[var(--surface-2)] neon-card rounded-xl p-4">
+          <div className="text-xs text-[var(--muted)] mb-1">Abgelehnte Updates</div>
+          <div className={`text-2xl font-semibold ${hasFailures ? 'text-red-400' : 'text-[var(--text)]'}`}>
             {status?.total_failed?.toLocaleString('de-DE') ?? '—'}
           </div>
-          <div className="text-xs text-[#6b5f8a] mt-0.5">
+          <div className="text-xs text-[var(--muted)] mt-0.5">
             {status?.last_rejected_at ? `Zuletzt: ${fmtTime(status.last_rejected_at)}` : 'Keine'}
           </div>
         </div>
-        <div className="bg-[#100c1e] neon-card rounded-xl p-4">
-          <div className="text-xs text-[#6b5f8a] mb-1">Status</div>
+        <div className="bg-[var(--surface-2)] neon-card rounded-xl p-4">
+          <div className="text-xs text-[var(--muted)] mb-1">Status</div>
           {hasFailures && !hasSuccess ? (
             <div className="text-sm font-semibold text-red-400">Fehler</div>
           ) : hasSuccess ? (
             <div className="text-lg font-semibold text-green-400">OK</div>
           ) : (
-            <div className="text-sm font-semibold text-[#6b5f8a]">Kein Traffic</div>
+            <div className="text-sm font-semibold text-[var(--muted)]">Kein Traffic</div>
           )}
         </div>
       </div>
@@ -71,7 +71,7 @@ function DDNSStatusCards({ status, keys }: { status: DDNSStatus | null; keys: TS
         <div className="mb-4 p-3 bg-red-900/20 border border-red-500/30 rounded-lg">
           <div className="text-xs font-semibold text-red-400 mb-1">Letzter Ablehnungsgrund</div>
           <div className="font-mono text-xs text-red-300">{status.last_rejected_reason}</div>
-          <div className="text-xs text-[#6b5f8a] mt-1">{fmtTime(status.last_rejected_at)}</div>
+          <div className="text-xs text-[var(--muted)] mt-1">{fmtTime(status.last_rejected_at)}</div>
           {status.last_rejected_reason.startsWith('NOTZONE') && (
             <div className="mt-2 text-xs text-yellow-400/80">
               Die Zone existiert nicht in DomU DNS. Lege sie unter <strong>Zonen</strong> an, bevor der DHCP-Server Updates senden kann.
@@ -87,7 +87,7 @@ function DDNSStatusCards({ status, keys }: { status: DDNSStatus | null; keys: TS
 
       {/* Hinweis wenn noch keine Updates ankamen */}
       {!hasSuccess && !hasFailures && !noKeys && (
-        <div className="mb-4 p-3 bg-[#100c1e] border border-[#2a1f42] rounded-lg text-xs text-[#6b5f8a]">
+        <div className="mb-4 p-3 bg-[var(--surface-2)] border border-[var(--border)] rounded-lg text-xs text-[var(--muted)]">
           Noch keine RFC 2136 Updates empfangen. Stelle sicher dass der DHCP-Server auf Port 53 dieser Adresse sendet
           und die Zielzone in DomU DNS existiert.
         </div>
@@ -109,30 +109,30 @@ function TSIGKeyTable({
   onDelete: (name: string) => void
 }) {
   return (
-    <div className="bg-[#100c1e] neon-card rounded-xl overflow-hidden mb-4">
+    <div className="bg-[var(--surface-2)] neon-card rounded-xl overflow-hidden mb-4">
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b border-[#2a1f42]">
-              <th className="text-left px-4 py-3 text-xs font-medium text-[#6b5f8a] uppercase tracking-wider">Name</th>
-              <th className="text-left px-4 py-3 text-xs font-medium text-[#6b5f8a] uppercase tracking-wider hidden sm:table-cell">Algorithmus</th>
-              <th className="text-left px-4 py-3 text-xs font-medium text-[#6b5f8a] uppercase tracking-wider hidden md:table-cell">Erstellt</th>
+            <tr className="border-b border-[var(--border)]">
+              <th className="text-left px-4 py-3 text-xs font-medium text-[var(--muted)] uppercase tracking-wider">Name</th>
+              <th className="text-left px-4 py-3 text-xs font-medium text-[var(--muted)] uppercase tracking-wider hidden sm:table-cell">Algorithmus</th>
+              <th className="text-left px-4 py-3 text-xs font-medium text-[var(--muted)] uppercase tracking-wider hidden md:table-cell">Erstellt</th>
               <th className="px-4 py-3" />
             </tr>
           </thead>
-          <tbody className="divide-y divide-[#2a1f42]/50">
+          <tbody className="divide-y divide-[var(--border)]/50">
             {keys.length === 0 ? (
               <tr>
-                <td colSpan={4} className="px-4 py-6 text-center text-[#6b5f8a] text-sm">
+                <td colSpan={4} className="px-4 py-6 text-center text-[var(--muted)] text-sm">
                   Keine TSIG-Keys konfiguriert
                 </td>
               </tr>
             ) : (
               keys.map((k) => (
-                <tr key={k.name} className="hover:bg-[#2a1f42]/30 transition-colors">
-                  <td className="px-4 py-3 font-medium text-[#f0eeff] font-mono text-xs">{k.name}</td>
-                  <td className="px-4 py-3 text-[#9a8cbf] text-xs hidden sm:table-cell">{k.algorithm}</td>
-                  <td className="px-4 py-3 text-[#6b5f8a] text-xs hidden md:table-cell">{fmtTime(k.created_at)}</td>
+                <tr key={k.name} className="hover:bg-[var(--surface-3)]/50 transition-colors">
+                  <td className="px-4 py-3 font-medium text-[var(--text)] font-mono text-xs">{k.name}</td>
+                  <td className="px-4 py-3 text-[var(--muted-2)] text-xs hidden sm:table-cell">{k.algorithm}</td>
+                  <td className="px-4 py-3 text-[var(--muted)] text-xs hidden md:table-cell">{fmtTime(k.created_at)}</td>
                   <td className="px-4 py-3 text-right">
                     <button
                       onClick={() => onDelete(k.name)}
@@ -179,8 +179,8 @@ function CreateKeyForm({
   }
 
   return (
-    <div className="bg-[#100c1e] neon-card rounded-xl p-4">
-      <div className="text-sm font-medium text-[#9a8cbf] mb-3">Neuen TSIG-Key erstellen</div>
+    <div className="bg-[var(--surface-2)] neon-card rounded-xl p-4">
+      <div className="text-sm font-medium text-[var(--muted-2)] mb-3">Neuen TSIG-Key erstellen</div>
 
       {secret && (
         <div className="mb-4 p-3 bg-yellow-900/20 border border-yellow-500/30 rounded-lg">
@@ -205,21 +205,21 @@ function CreateKeyForm({
 
       <form onSubmit={handleSubmit} className="flex flex-wrap gap-2 items-end">
         <div className="flex-1 min-w-40">
-          <label className="block text-xs text-[#6b5f8a] mb-1">Name</label>
+          <label className="block text-xs text-[var(--muted)] mb-1">Name</label>
           <input
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="z.B. dhcpd-key"
-            className="w-full px-3 py-2 rounded-lg bg-[#0d0920] border border-[#2a1f42] text-[#f0eeff] text-sm placeholder-[#6b5f8a] focus:outline-none focus:border-violet-500/50"
+            className="w-full px-3 py-2 rounded-lg bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] text-sm placeholder-[#5A5A6E] focus:outline-none focus:border-amber-500/30"
           />
         </div>
         <div>
-          <label className="block text-xs text-[#6b5f8a] mb-1">Algorithmus</label>
+          <label className="block text-xs text-[var(--muted)] mb-1">Algorithmus</label>
           <select
             value={algorithm}
             onChange={(e) => setAlgorithm(e.target.value)}
-            className="px-3 py-2 rounded-lg bg-[#0d0920] border border-[#2a1f42] text-[#f0eeff] text-sm focus:outline-none focus:border-violet-500/50"
+            className="px-3 py-2 rounded-lg bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] text-sm focus:outline-none focus:border-amber-500/30"
           >
             <option value="hmac-sha256">HMAC-SHA256</option>
             <option value="hmac-sha512">HMAC-SHA512</option>
@@ -229,7 +229,7 @@ function CreateKeyForm({
         <button
           type="submit"
           disabled={loading || !name.trim()}
-          className="px-4 py-2 rounded-lg bg-violet-600 hover:bg-violet-500 disabled:opacity-40 text-white text-sm font-medium transition-colors"
+          className="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-500 disabled:opacity-40 text-white text-sm font-medium transition-colors"
         >
           {loading ? 'Erstelle…' : 'Erstellen'}
         </button>
@@ -290,45 +290,45 @@ ddns-rev-domainname "in-addr.arpa.";`
   }
 
   return (
-    <div className="mb-4 bg-[#100c1e] neon-card rounded-xl p-4">
+    <div className="mb-4 bg-[var(--surface-2)] neon-card rounded-xl p-4">
       <div className="flex items-center justify-between mb-3">
-        <div className="text-sm font-medium text-[#9a8cbf]">dhcpd Konfigurationsanleitung</div>
+        <div className="text-sm font-medium text-[var(--muted-2)]">dhcpd Konfigurationsanleitung</div>
         <button
           onClick={handleCopy}
-          className="text-xs text-violet-400 hover:text-violet-300 transition-colors px-2 py-1 rounded hover:bg-violet-900/20"
+          className="text-xs text-amber-400 hover:text-amber-400 transition-colors px-2 py-1 rounded hover:bg-amber-500/10"
         >
           {copied ? 'Kopiert!' : 'Alles kopieren'}
         </button>
       </div>
 
       <div className="mb-3">
-        <label className="block text-xs text-[#6b5f8a] mb-1">Zonenname (für Snippet)</label>
+        <label className="block text-xs text-[var(--muted)] mb-1">Zonenname (für Snippet)</label>
         <input
           type="text"
           value={zone}
           onChange={(e) => setZone(e.target.value)}
           placeholder="z.B. home.example.local"
-          className="w-full sm:w-72 px-3 py-1.5 rounded-lg bg-[#0d0920] border border-[#2a1f42] text-[#f0eeff] text-xs placeholder-[#6b5f8a] focus:outline-none focus:border-violet-500/50"
+          className="w-full sm:w-72 px-3 py-1.5 rounded-lg bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] text-xs placeholder-[#5A5A6E] focus:outline-none focus:border-amber-500/30"
         />
       </div>
 
       <div className="space-y-2 text-xs">
-        <div className="p-1 text-[#6b5f8a]">
-          1. Globale Einstellungen an den Anfang von <code className="bg-[#2a1f42] px-1 rounded">/etc/dhcp/dhcpd.conf</code> einfügen:
+        <div className="p-1 text-[var(--muted)]">
+          1. Globale Einstellungen an den Anfang von <code className="bg-[var(--border)] px-1 rounded">/etc/dhcp/dhcpd.conf</code> einfügen:
         </div>
-        <pre className="bg-[#0d0920] rounded-lg p-3 overflow-x-auto text-[#9a8cbf] font-mono leading-relaxed text-[11px]">{globalSnippet}</pre>
+        <pre className="bg-[var(--surface)] rounded-lg p-3 overflow-x-auto text-[var(--muted-2)] font-mono leading-relaxed text-[11px]">{globalSnippet}</pre>
 
-        <div className="p-1 text-[#6b5f8a]">2. TSIG-Key-Block einfügen (Secret aus DomU DNS beim Erstellen des Keys):</div>
-        <pre className="bg-[#0d0920] rounded-lg p-3 overflow-x-auto text-[#9a8cbf] font-mono leading-relaxed text-[11px]">{keySnippet}</pre>
+        <div className="p-1 text-[var(--muted)]">2. TSIG-Key-Block einfügen (Secret aus DomU DNS beim Erstellen des Keys):</div>
+        <pre className="bg-[var(--surface)] rounded-lg p-3 overflow-x-auto text-[var(--muted-2)] font-mono leading-relaxed text-[11px]">{keySnippet}</pre>
 
-        <div className="p-1 text-[#6b5f8a]">3. Zone-Block einfügen:</div>
-        <pre className="bg-[#0d0920] rounded-lg p-3 overflow-x-auto text-[#9a8cbf] font-mono leading-relaxed text-[11px]">{zoneSnippet}</pre>
+        <div className="p-1 text-[var(--muted)]">3. Zone-Block einfügen:</div>
+        <pre className="bg-[var(--surface)] rounded-lg p-3 overflow-x-auto text-[var(--muted-2)] font-mono leading-relaxed text-[11px]">{zoneSnippet}</pre>
 
-        <div className="p-1 text-[#6b5f8a]">4. Im <code className="bg-[#2a1f42] px-1 rounded">subnet</code>-Block ergänzen:</div>
-        <pre className="bg-[#0d0920] rounded-lg p-3 overflow-x-auto text-[#9a8cbf] font-mono leading-relaxed text-[11px]">{subnetSnippet}</pre>
+        <div className="p-1 text-[var(--muted)]">4. Im <code className="bg-[var(--border)] px-1 rounded">subnet</code>-Block ergänzen:</div>
+        <pre className="bg-[var(--surface)] rounded-lg p-3 overflow-x-auto text-[var(--muted-2)] font-mono leading-relaxed text-[11px]">{subnetSnippet}</pre>
 
         <div className="p-2 bg-yellow-900/20 border border-yellow-500/20 rounded-lg text-yellow-400/80">
-          Nach Änderungen: <code className="bg-[#2a1f42] px-1 rounded">sudo systemctl restart isc-dhcp-server</code>
+          Nach Änderungen: <code className="bg-[var(--border)] px-1 rounded">sudo systemctl restart isc-dhcp-server</code>
           {' '}— dhcpd sendet dann beim nächsten DHCPACK automatisch ein RFC 2136 UPDATE.
         </div>
       </div>
@@ -347,32 +347,32 @@ function DHCPStatusCard({ status }: { status: DHCPSyncStatus }) {
 
   return (
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
-      <div className="bg-[#100c1e] neon-card rounded-xl p-4">
-        <div className="text-xs text-[#6b5f8a] mb-1">Quelle</div>
-        <div className="text-lg font-semibold text-[#f0eeff]">
+      <div className="bg-[var(--surface-2)] neon-card rounded-xl p-4">
+        <div className="text-xs text-[var(--muted)] mb-1">Quelle</div>
+        <div className="text-lg font-semibold text-[var(--text)]">
           {sourceLabels[status.source] ?? status.source}
         </div>
-        <div className="text-xs text-[#6b5f8a] mt-0.5">
+        <div className="text-xs text-[var(--muted)] mt-0.5">
           {status.enabled ? 'Aktiv' : 'Deaktiviert'}
         </div>
       </div>
-      <div className="bg-[#100c1e] neon-card rounded-xl p-4">
-        <div className="text-xs text-[#6b5f8a] mb-1">Leases</div>
-        <div className="text-lg font-semibold text-[#f0eeff]">
+      <div className="bg-[var(--surface-2)] neon-card rounded-xl p-4">
+        <div className="text-xs text-[var(--muted)] mb-1">Leases</div>
+        <div className="text-lg font-semibold text-[var(--text)]">
           {status.lease_count.toLocaleString('de-DE')}
         </div>
-        <div className="text-xs text-[#6b5f8a] mt-0.5">
+        <div className="text-xs text-[var(--muted)] mt-0.5">
           {status.record_count.toLocaleString('de-DE')} DNS-Records
         </div>
       </div>
-      <div className="bg-[#100c1e] neon-card rounded-xl p-4">
-        <div className="text-xs text-[#6b5f8a] mb-1">Letzte Synchronisierung</div>
-        <div className="text-sm font-semibold text-[#f0eeff]">
+      <div className="bg-[var(--surface-2)] neon-card rounded-xl p-4">
+        <div className="text-xs text-[var(--muted)] mb-1">Letzte Synchronisierung</div>
+        <div className="text-sm font-semibold text-[var(--text)]">
           {fmtTime(status.last_sync)}
         </div>
       </div>
-      <div className="bg-[#100c1e] neon-card rounded-xl p-4">
-        <div className="text-xs text-[#6b5f8a] mb-1">Status</div>
+      <div className="bg-[var(--surface-2)] neon-card rounded-xl p-4">
+        <div className="text-xs text-[var(--muted)] mb-1">Status</div>
         {status.last_error ? (
           <div className="text-sm font-semibold text-red-400 truncate" title={status.last_error}>
             {status.last_error}
@@ -458,13 +458,13 @@ export default function DHCPPage() {
   })
 
   return (
-    <div className="flex flex-col min-h-screen bg-[#080612]">
+    <div className="flex flex-col min-h-screen bg-[var(--surface)]">
       <Topbar title="DDNS / DHCP" />
       <main className="flex-1 p-4 lg:p-6 max-w-7xl mx-auto w-full space-y-8">
 
         {/* ── Sektion 1: RFC 2136 DDNS ── */}
         <section>
-          <h2 className="text-base font-semibold text-[#f0eeff] mb-4">RFC 2136 DDNS</h2>
+          <h2 className="text-base font-semibold text-[var(--text)] mb-4">RFC 2136 DDNS</h2>
 
           {ddnsError && (
             <div className="mb-4 p-3 bg-red-900/20 border border-red-500/30 rounded-lg text-red-400 text-sm">
@@ -481,15 +481,15 @@ export default function DHCPPage() {
 
         {/* ── Sektion 2: File-basierter DHCP-Lease-Sync ── */}
         <section>
-          <h2 className="text-base font-semibold text-[#f0eeff] mb-4">DHCP-Lease-Sync</h2>
+          <h2 className="text-base font-semibold text-[var(--text)] mb-4">DHCP-Lease-Sync</h2>
 
           {!dhcpLoading && !dhcpEnabled ? (
-            <div className="bg-[#100c1e] neon-card rounded-xl p-6 text-sm text-[#6b5f8a]">
-              <div className="font-semibold mb-1 text-[#9a8cbf]">Nicht konfiguriert</div>
+            <div className="bg-[var(--surface-2)] neon-card rounded-xl p-6 text-sm text-[var(--muted)]">
+              <div className="font-semibold mb-1 text-[var(--muted-2)]">Nicht konfiguriert</div>
               <div>
                 Für File-basiertes Lease-Polling aktiviere{' '}
-                <code className="bg-[#2a1f42] px-1 rounded">dhcp_lease_sync.enabled: true</code>{' '}
-                in der <code className="bg-[#2a1f42] px-1 rounded">config.yaml</code>.
+                <code className="bg-[var(--border)] px-1 rounded">dhcp_lease_sync.enabled: true</code>{' '}
+                in der <code className="bg-[var(--border)] px-1 rounded">config.yaml</code>.
                 Für RFC 2136 verwende den TSIG-Key-Bereich oben.
               </div>
             </div>
@@ -503,35 +503,35 @@ export default function DHCPPage() {
                   placeholder="Hostname, IP oder MAC suchen..."
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  className="w-full sm:w-80 px-3 py-2 rounded-lg bg-[#100c1e] border border-[#2a1f42] text-[#f0eeff] text-sm placeholder-[#6b5f8a] focus:outline-none focus:border-violet-500/50"
+                  className="w-full sm:w-80 px-3 py-2 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text)] text-sm placeholder-[#5A5A6E] focus:outline-none focus:border-amber-500/30"
                 />
               </div>
 
-              <div className="bg-[#100c1e] neon-card rounded-xl overflow-hidden">
+              <div className="bg-[var(--surface-2)] neon-card rounded-xl overflow-hidden">
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
-                      <tr className="border-b border-[#2a1f42]">
-                        <th className="text-left px-4 py-3 text-xs font-medium text-[#6b5f8a] uppercase tracking-wider">Hostname</th>
-                        <th className="text-left px-4 py-3 text-xs font-medium text-[#6b5f8a] uppercase tracking-wider">IP-Adresse</th>
-                        <th className="text-left px-4 py-3 text-xs font-medium text-[#6b5f8a] uppercase tracking-wider hidden sm:table-cell">MAC-Adresse</th>
-                        <th className="text-left px-4 py-3 text-xs font-medium text-[#6b5f8a] uppercase tracking-wider hidden md:table-cell">Aktualisiert</th>
+                      <tr className="border-b border-[var(--border)]">
+                        <th className="text-left px-4 py-3 text-xs font-medium text-[var(--muted)] uppercase tracking-wider">Hostname</th>
+                        <th className="text-left px-4 py-3 text-xs font-medium text-[var(--muted)] uppercase tracking-wider">IP-Adresse</th>
+                        <th className="text-left px-4 py-3 text-xs font-medium text-[var(--muted)] uppercase tracking-wider hidden sm:table-cell">MAC-Adresse</th>
+                        <th className="text-left px-4 py-3 text-xs font-medium text-[var(--muted)] uppercase tracking-wider hidden md:table-cell">Aktualisiert</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-[#2a1f42]/50">
+                    <tbody className="divide-y divide-[var(--border)]/50">
                       {filtered.length === 0 ? (
                         <tr>
-                          <td colSpan={4} className="px-4 py-8 text-center text-[#6b5f8a]">
+                          <td colSpan={4} className="px-4 py-8 text-center text-[var(--muted)]">
                             {search ? 'Keine Treffer' : 'Keine DHCP-Leases vorhanden'}
                           </td>
                         </tr>
                       ) : (
                         filtered.map((lease) => (
-                          <tr key={lease.ip} className="hover:bg-[#2a1f42]/30 transition-colors">
-                            <td className="px-4 py-3 font-medium text-[#f0eeff]">{lease.hostname}</td>
-                            <td className="px-4 py-3 text-[#9a8cbf] font-mono text-xs">{lease.ip}</td>
-                            <td className="px-4 py-3 text-[#9a8cbf] font-mono text-xs hidden sm:table-cell">{lease.mac}</td>
-                            <td className="px-4 py-3 text-[#6b5f8a] text-xs hidden md:table-cell">{fmtTime(lease.updated_at)}</td>
+                          <tr key={lease.ip} className="hover:bg-[var(--surface-3)]/50 transition-colors">
+                            <td className="px-4 py-3 font-medium text-[var(--text)]">{lease.hostname}</td>
+                            <td className="px-4 py-3 text-[var(--muted-2)] font-mono text-xs">{lease.ip}</td>
+                            <td className="px-4 py-3 text-[var(--muted-2)] font-mono text-xs hidden sm:table-cell">{lease.mac}</td>
+                            <td className="px-4 py-3 text-[var(--muted)] text-xs hidden md:table-cell">{fmtTime(lease.updated_at)}</td>
                           </tr>
                         ))
                       )}
@@ -539,7 +539,7 @@ export default function DHCPPage() {
                   </table>
                 </div>
                 {filtered.length > 0 && (
-                  <div className="px-4 py-2 border-t border-[#2a1f42] text-xs text-[#6b5f8a]">
+                  <div className="px-4 py-2 border-t border-[var(--border)] text-xs text-[var(--muted)]">
                     {filtered.length} {filtered.length === 1 ? 'Lease' : 'Leases'}
                     {search && filtered.length !== leases.length && ` (von ${leases.length} gesamt)`}
                   </div>

@@ -22,7 +22,7 @@ function resultBadge(result: string) {
   const styles: Record<string, string> = {
     blocked:      'bg-red-500/15 text-red-400 border border-red-500/20',
     cached:       'bg-emerald-500/15 text-emerald-400 border border-emerald-500/20',
-    authoritative:'bg-violet-500/15 text-violet-400 border border-violet-500/20',
+    authoritative:'bg-amber-500/10 text-amber-400 border border-amber-500/30',
     forwarded:    'bg-slate-500/15 text-slate-300 border border-slate-500/20',
     error:        'bg-orange-500/15 text-orange-400 border border-orange-500/20',
     allowed:      'bg-green-500/20 text-green-400 border border-green-500/30',
@@ -62,19 +62,19 @@ function FilterBar({ filter, onChange }: { filter: Filter; onChange: (f: Filter)
         placeholder="Client-IP..."
         value={filter.client}
         onChange={e => onChange({ ...filter, client: e.target.value })}
-        className="bg-[#100c1e] border border-[#2a1f42] rounded-lg px-3 py-1.5 text-sm text-[#f0eeff] placeholder-[#6b5f8a] focus:outline-none focus:border-violet-500/50 w-36"
+        className="bg-[var(--surface-2)] border border-[var(--border)] rounded-lg px-3 py-1.5 text-sm text-[var(--text)] placeholder-[#5A5A6E] focus:outline-none focus:border-amber-500/30 w-36"
       />
       <input
         type="text"
         placeholder="Domain..."
         value={filter.domain}
         onChange={e => onChange({ ...filter, domain: e.target.value })}
-        className="bg-[#100c1e] border border-[#2a1f42] rounded-lg px-3 py-1.5 text-sm text-[#f0eeff] placeholder-[#6b5f8a] focus:outline-none focus:border-violet-500/50 w-44"
+        className="bg-[var(--surface-2)] border border-[var(--border)] rounded-lg px-3 py-1.5 text-sm text-[var(--text)] placeholder-[#5A5A6E] focus:outline-none focus:border-amber-500/30 w-44"
       />
       <select
         value={filter.result}
         onChange={e => onChange({ ...filter, result: e.target.value as ResultFilter })}
-        className="bg-[#100c1e] border border-[#2a1f42] rounded-lg px-3 py-1.5 text-sm text-[#9a8cbf] focus:outline-none focus:border-violet-500/50"
+        className="bg-[var(--surface-2)] border border-[var(--border)] rounded-lg px-3 py-1.5 text-sm text-[var(--muted-2)] focus:outline-none focus:border-amber-500/30"
       >
         <option value="">Alle Ergebnisse</option>
         <option value="blocked">Blockiert</option>
@@ -86,7 +86,7 @@ function FilterBar({ filter, onChange }: { filter: Filter; onChange: (f: Filter)
       <select
         value={filter.qtype}
         onChange={e => onChange({ ...filter, qtype: e.target.value })}
-        className="bg-[#100c1e] border border-[#2a1f42] rounded-lg px-3 py-1.5 text-sm text-[#9a8cbf] focus:outline-none focus:border-violet-500/50"
+        className="bg-[var(--surface-2)] border border-[var(--border)] rounded-lg px-3 py-1.5 text-sm text-[var(--muted-2)] focus:outline-none focus:border-amber-500/30"
       >
         <option value="">Alle Typen</option>
         {['A', 'AAAA', 'MX', 'TXT', 'CNAME', 'NS', 'PTR', 'SRV'].map(t => (
@@ -96,7 +96,7 @@ function FilterBar({ filter, onChange }: { filter: Filter; onChange: (f: Filter)
       <select
         value={filter.limit}
         onChange={e => onChange({ ...filter, limit: Number(e.target.value) })}
-        className="bg-[#100c1e] border border-[#2a1f42] rounded-lg px-3 py-1.5 text-sm text-[#9a8cbf] focus:outline-none focus:border-violet-500/50"
+        className="bg-[var(--surface-2)] border border-[var(--border)] rounded-lg px-3 py-1.5 text-sm text-[var(--muted-2)] focus:outline-none focus:border-amber-500/30"
       >
         <option value={50}>50 Einträge</option>
         <option value={100}>100 Einträge</option>
@@ -147,34 +147,34 @@ function RowMenu({ entry, onWhitelisted, onError }: { entry: QueryLogEntry; onWh
     <div className="relative" ref={ref}>
       <button
         onClick={() => setOpen(v => !v)}
-        className="p-1 rounded text-[#6b5f8a] hover:text-[#9a8cbf] hover:bg-[#2a1f42] transition-colors"
+        className="p-1 rounded text-[var(--muted)] hover:text-[var(--muted-2)] hover:bg-[var(--border)] transition-colors"
         title="Aktionen"
       >
         <span className="text-base leading-none">⋯</span>
       </button>
 
       {open && (
-        <div className="absolute right-0 top-6 z-50 w-48 bg-[#100c1e] neon-card rounded-xl shadow-xl py-1">
+        <div className="absolute right-0 top-6 z-50 w-48 bg-[var(--surface-2)] neon-card rounded-xl shadow-xl py-1">
           <button
             onClick={handleAllow}
             disabled={loading || done}
-            className="flex items-center gap-2 w-full px-3 py-2 text-xs text-left hover:bg-[#2a1f42] transition-colors disabled:opacity-50"
+            className="flex items-center gap-2 w-full px-3 py-2 text-xs text-left hover:bg-[var(--border)] transition-colors disabled:opacity-50"
           >
             {done ? (
               <span className="text-emerald-400">✓ Freigegeben</span>
             ) : loading ? (
               <>
                 <span className="inline-block w-3 h-3 border border-current border-t-transparent rounded-full animate-spin" />
-                <span className="text-[#9a8cbf]">Wird freigegeben…</span>
+                <span className="text-[var(--muted-2)]">Wird freigegeben…</span>
               </>
             ) : (
               <>
                 <span className="text-emerald-400">✓</span>
-                <span className="text-[#f0eeff]">Domain freigeben</span>
+                <span className="text-[var(--text)]">Domain freigeben</span>
               </>
             )}
           </button>
-          <div className="px-3 py-1 text-[10px] text-[#6b5f8a] border-t border-[#2a1f42] mt-1 pt-1 truncate">
+          <div className="px-3 py-1 text-[10px] text-[var(--muted)] border-t border-[var(--border)] mt-1 pt-1 truncate">
             {entry.domain}
           </div>
         </div>
@@ -193,8 +193,8 @@ function LogTable({ entries, loading, onWhitelisted, onError }: {
 }) {
   if (loading && entries.length === 0) {
     return (
-      <div className="flex items-center justify-center py-16 text-[#6b5f8a]">
-        <span className="inline-block w-4 h-4 border-2 border-violet-500 border-t-transparent rounded-full animate-spin mr-2" />
+      <div className="flex items-center justify-center py-16 text-[var(--muted)]">
+        <span className="inline-block w-4 h-4 border-2 border-amber-500 border-t-transparent rounded-full animate-spin mr-2" />
         Lade Query-Log...
       </div>
     )
@@ -202,10 +202,10 @@ function LogTable({ entries, loading, onWhitelisted, onError }: {
 
   if (!loading && entries.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center py-16 text-[#6b5f8a]">
+      <div className="flex flex-col items-center justify-center py-16 text-[var(--muted)]">
         <div className="text-2xl mb-2">◈</div>
         <div className="text-sm">Keine Einträge — Query-Log ist leer oder nicht aktiviert.</div>
-        <div className="text-xs mt-1 text-[#2a1f42]">Aktiviere <code className="text-violet-400">system.query_log.enabled: true</code> in der Config.</div>
+        <div className="text-xs mt-1 text-[#2A2A34]">Aktiviere <code className="text-amber-400">system.query_log.enabled: true</code> in der Config.</div>
       </div>
     )
   }
@@ -214,7 +214,7 @@ function LogTable({ entries, loading, onWhitelisted, onError }: {
     <div className="overflow-x-auto">
       <table className="w-full text-xs">
         <thead>
-          <tr className="border-b border-[#2a1f42] text-[#6b5f8a]">
+          <tr className="border-b border-[var(--border)] text-[var(--muted)]">
             <th className="text-left py-2 px-3 font-medium">Zeit</th>
             <th className="text-left py-2 px-3 font-medium">Client</th>
             <th className="text-left py-2 px-3 font-medium">Domain</th>
@@ -230,26 +230,26 @@ function LogTable({ entries, loading, onWhitelisted, onError }: {
           {entries.map((e, i) => (
             <tr
               key={i}
-              className={`border-b border-[#100c1e] hover:bg-[#100c1e]/60 transition-colors group ${
+              className={`border-b border-[var(--surface-2)] hover:bg-[var(--surface-2)]/60 transition-colors group ${
                 e.result === 'allowed' ? 'bg-green-500/[0.04]' :
                 e.blocked ? 'bg-red-500/[0.03]' : ''
               }`}
             >
-              <td className="py-1.5 px-3 text-[#6b5f8a] whitespace-nowrap">{fmtTime(e.ts)}</td>
-              <td className="py-1.5 px-3 text-[#9a8cbf] font-mono">{e.client}</td>
+              <td className="py-1.5 px-3 text-[var(--muted)] whitespace-nowrap">{fmtTime(e.ts)}</td>
+              <td className="py-1.5 px-3 text-[var(--muted-2)] font-mono">{e.client}</td>
               <td className="py-1.5 px-3 font-mono max-w-[200px] truncate" title={e.domain}>
                 <span className={
                   e.result === 'allowed' ? 'text-green-400' :
-                  e.blocked ? 'text-red-400' : 'text-[#f0eeff]'
+                  e.blocked ? 'text-red-400' : 'text-[var(--text)]'
                 }>{e.domain}</span>
               </td>
               <td className="py-1.5 px-3">
-                <span className="text-[#6b5f8a] font-mono">{e.qtype}</span>
+                <span className="text-[var(--muted)] font-mono">{e.qtype}</span>
               </td>
               <td className="py-1.5 px-3">{resultBadge(e.result)}</td>
-              <td className="py-1.5 px-3 text-[#6b5f8a] font-mono">{fmtLatency(e.latency_us)}</td>
-              <td className="py-1.5 px-3 text-[#6b5f8a] font-mono hidden lg:table-cell">{e.upstream || '—'}</td>
-              <td className="py-1.5 px-3 text-[#6b5f8a] hidden lg:table-cell">{e.node}</td>
+              <td className="py-1.5 px-3 text-[var(--muted)] font-mono">{fmtLatency(e.latency_us)}</td>
+              <td className="py-1.5 px-3 text-[var(--muted)] font-mono hidden lg:table-cell">{e.upstream || '—'}</td>
+              <td className="py-1.5 px-3 text-[var(--muted)] hidden lg:table-cell">{e.node}</td>
               <td className="py-1 px-2">
                 {/* Menu visible only for blocked domains; for others visible on hover */}
                 <div className={e.blocked ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 transition-opacity'}>
@@ -345,8 +345,8 @@ export default function QueryLogPage() {
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-base font-semibold text-[#f0eeff]">DNS Query-Log</h2>
-            <p className="text-xs text-[#6b5f8a]">
+            <h2 className="text-base font-semibold text-[var(--text)]">DNS Query-Log</h2>
+            <p className="text-xs text-[var(--muted)]">
               {total > 0 ? `${total.toLocaleString('de-DE')} Einträge im Speicher` : 'Alle DNS-Anfragen in Echtzeit'}
             </p>
           </div>
@@ -355,16 +355,16 @@ export default function QueryLogPage() {
               onClick={() => setAutoRefresh(v => !v)}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${
                 autoRefresh
-                  ? 'bg-violet-500/15 text-violet-400 border-violet-500/20'
-                  : 'bg-[#100c1e] text-[#6b5f8a] border-[#2a1f42] hover:text-[#9a8cbf]'
+                  ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                  : 'bg-[var(--surface-2)] text-[var(--muted)] border-[var(--border)] hover:text-[var(--muted-2)]'
               }`}
             >
-              <span className={`w-1.5 h-1.5 rounded-full ${autoRefresh ? 'bg-violet-400 animate-pulse' : 'bg-[#6b5f8a]'}`} />
+              <span className={`w-1.5 h-1.5 rounded-full ${autoRefresh ? 'bg-amber-500 animate-pulse' : 'bg-[#5A5A6E]'}`} />
               {autoRefresh ? 'Live' : 'Pausiert'}
             </button>
             <button
               onClick={() => { setLoading(true); fetchLog() }}
-              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-[#100c1e] border border-[#2a1f42] text-[#9a8cbf] hover:text-[#f0eeff] transition-colors"
+              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-[var(--surface-2)] border border-[var(--border)] text-[var(--muted-2)] hover:text-[var(--text)] transition-colors"
             >
               ↻ Aktualisieren
             </button>
@@ -375,7 +375,7 @@ export default function QueryLogPage() {
         <FilterBar filter={filter} onChange={f => { setFilter(f); setLoading(true) }} />
 
         {/* Table */}
-        <div className="bg-[#100c1e] neon-card rounded-xl overflow-hidden">
+        <div className="bg-[var(--surface-2)] neon-card rounded-xl overflow-hidden">
           <LogTable entries={entries} loading={loading} onWhitelisted={handleWhitelisted} onError={msg => { setToast({ msg, type: 'error' }); setTimeout(() => setToast(null), 5000) }} />
         </div>
 

@@ -78,10 +78,28 @@ func TestValidateRecord(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:    "invalid name - underscore",
+			name:    "valid name - underscore allowed (e.g. DHCP hostname esp_cc8108)",
 			record:  Record{Name: "invalid_name", Type: TypeA, TTL: 3600, Value: "192.168.1.1"},
 			zone:    "example.com",
-			wantErr: true,
+			wantErr: false,
+		},
+		{
+			name:    "valid name - DHCP-style hostname with underscore",
+			record:  Record{Name: "esp_cc8108", Type: TypeA, TTL: 3600, Value: "192.168.1.50"},
+			zone:    "example.com",
+			wantErr: false,
+		},
+		{
+			name:    "valid name - ACME challenge label",
+			record:  Record{Name: "_acme-challenge", Type: TypeTXT, TTL: 300, Value: "sometoken"},
+			zone:    "example.com",
+			wantErr: false,
+		},
+		{
+			name:    "valid name - DMARC label",
+			record:  Record{Name: "_dmarc", Type: TypeTXT, TTL: 3600, Value: "v=DMARC1; p=none"},
+			zone:    "example.com",
+			wantErr: false,
 		},
 		{
 			name:    "invalid name - dot",
@@ -99,6 +117,12 @@ func TestValidateRecord(t *testing.T) {
 		{
 			name:    "valid PTR record in in-addr.arpa zone",
 			record:  Record{Name: "1", Type: TypePTR, TTL: 3600, Value: "router.int.example.com"},
+			zone:    "100.168.192.in-addr.arpa",
+			wantErr: false,
+		},
+		{
+			name:    "valid PTR record - DHCP hostname with underscore",
+			record:  Record{Name: "79", Type: TypePTR, TTL: 3600, Value: "ESP_CC8108.int.example.com"},
 			zone:    "100.168.192.in-addr.arpa",
 			wantErr: false,
 		},

@@ -29,6 +29,7 @@ type Router struct {
 	clusterHandler     http.Handler        // /api/internal/* (nil if no cluster)
 	clusterInfoHandler *ClusterInfoHandler  // /api/cluster (nil if not configured)
 	importExport       *ImportExportHandler // /api/zones/import, /api/zones/{domain}/export
+	cacheHandler       *CacheHandler        // /api/cache (nil if cache disabled)
 	slaveMode          bool                 // true when this node is a slave
 	masterURL          string               // master URL for slave error messages
 }
@@ -104,6 +105,11 @@ func (r *Router) SetImportExportHandler(h *ImportExportHandler) {
 	r.importExport = h
 }
 
+// SetCacheHandler sets the handler for /api/cache endpoints.
+func (r *Router) SetCacheHandler(h *CacheHandler) {
+	r.cacheHandler = h
+}
+
 // SetSlaveMode enables read-only mode for this node.
 // All mutating API requests are rejected with HTTP 403.
 func (r *Router) SetSlaveMode(masterURL string) {
@@ -122,11 +128,14 @@ func isMutatingMethod(method string) bool {
 
 // isReadOnlyAllowed returns true for paths that are allowed to be mutating on slaves as well.
 func isReadOnlyAllowed(path string) bool {
-	// Login, setup and cluster sync are allowed on slaves too
+	// Login, setup and cluster sync are allowed on slaves too.
+	// Cache flush/delete is local-only (not cluster-propagated), so allowed on slaves.
 	return path == "/api/login" ||
 		path == "/api/logout" ||
 		strings.HasPrefix(path, "/api/setup/") ||
-		strings.HasPrefix(path, "/api/internal/")
+		strings.HasPrefix(path, "/api/internal/") ||
+		path == "/api/cache" ||
+		strings.HasPrefix(path, "/api/cache/")
 }
 
 // ServeHTTP implements http.Handler.
@@ -236,6 +245,13 @@ func (r *Router) apiHandler(req *http.Request) http.Handler {
 		}
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "NOT_FOUND", "DHCP-Lease-Sync not configured")
+		})
+	case path == "/api/cache" || strings.HasPrefix(path, "/api/cache/"):
+		if r.cacheHandler != nil {
+			return r.cacheHandler
+		}
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			writeError(w, http.StatusNotFound, "NOT_FOUND", "Cache not enabled")
 		})
 	default:
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

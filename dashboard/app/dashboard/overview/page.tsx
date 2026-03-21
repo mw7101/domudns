@@ -19,13 +19,13 @@ import {
 import { useRouter } from 'next/navigation'
 import { InfoTooltip } from '@/components/shared/InfoTooltip'
 
-const COLORS = ['#a855f7', '#22c55e', '#f59e0b', '#ef4444', '#c084fc', '#7c3aed']
+const COLORS = ['#F59E0B', '#22c55e', '#f59e0b', '#ef4444', '#FCD34D', '#D97706']
 
 const CHART_TOOLTIP_STYLE = {
-  background: '#100c1e',
+  background: 'var(--surface-2)',
   border: '1px solid rgba(168,85,247,0.45)',
   borderRadius: 8,
-  color: '#f0eeff',
+  color: '#F4F4EF',
 }
 
 interface NodeStatus {
@@ -133,7 +133,7 @@ export default function OverviewPage() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="w-6 h-6 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" />
+        <div className="w-6 h-6 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
       </div>
     )
   }
@@ -226,7 +226,7 @@ export default function OverviewPage() {
                 <div>
                   <div className="text-sm font-semibold text-[var(--text)]">
                     Dieser Server
-                    <span className="ml-1.5 text-[10px] font-normal text-violet-400 bg-violet-400/10 px-1.5 py-0.5 rounded-full">
+                    <span className="ml-1.5 text-[10px] font-normal text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded-full">
                       {clusterRole}
                     </span>
                   </div>
@@ -364,7 +364,7 @@ export default function OverviewPage() {
 
         {/* Query time history (AreaChart) */}
         {historyChartData.length > 0 && (
-          <div className="bg-[#100c1e] neon-card rounded-2xl p-4">
+          <div className="bg-[var(--surface-2)] neon-card rounded-2xl p-4">
             <div className="flex items-center gap-2 mb-4">
               <span className="text-sm font-semibold text-[var(--muted-2)]">DNS-Anfragen (24h)</span>
               <InfoTooltip text="Zeitverlauf der DNS-Anfragen, blockierten und gecachten Antworten der letzten 24 Stunden." />
@@ -373,8 +373,8 @@ export default function OverviewPage() {
               <AreaChart data={historyChartData} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
                 <defs>
                   <linearGradient id="gradQueries" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#a855f7" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="#a855f7" stopOpacity={0} />
+                    <stop offset="5%" stopColor="#F59E0B" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="#F59E0B" stopOpacity={0} />
                   </linearGradient>
                   <linearGradient id="gradBlocked" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor="#ef4444" stopOpacity={0.3} />
@@ -385,22 +385,22 @@ export default function OverviewPage() {
                     <stop offset="95%" stopColor="#22c55e" stopOpacity={0} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#2a1f42" />
+                <CartesianGrid strokeDasharray="3 3" stroke="#2A2A34" />
                 <XAxis
                   dataKey="ts"
-                  tick={{ fill: '#6b5f8a', fontSize: 11 }}
+                  tick={{ fill: '#5A5A6E', fontSize: 11 }}
                   tickLine={false}
                   axisLine={false}
                   interval="preserveStartEnd"
                 />
                 <YAxis
-                  tick={{ fill: '#6b5f8a', fontSize: 11 }}
+                  tick={{ fill: '#5A5A6E', fontSize: 11 }}
                   tickLine={false}
                   axisLine={false}
                 />
-                <Tooltip contentStyle={CHART_TOOLTIP_STYLE} labelStyle={{ color: '#f0eeff' }} />
-                <Legend wrapperStyle={{ fontSize: 12, color: '#9a8cbf' }} />
-                <Area type="monotone" dataKey="Anfragen" stroke="#a855f7" fill="url(#gradQueries)" strokeWidth={2} dot={false} />
+                <Tooltip contentStyle={CHART_TOOLTIP_STYLE} labelStyle={{ color: '#F4F4EF' }} />
+                <Legend wrapperStyle={{ fontSize: 12, color: '#9A9AAE' }} />
+                <Area type="monotone" dataKey="Anfragen" stroke="#F59E0B" fill="url(#gradQueries)" strokeWidth={2} dot={false} />
                 <Area type="monotone" dataKey="Blockiert" stroke="#ef4444" fill="url(#gradBlocked)" strokeWidth={1.5} dot={false} />
                 <Area type="monotone" dataKey="Gecacht" stroke="#22c55e" fill="url(#gradCached)" strokeWidth={1.5} dot={false} />
               </AreaChart>
@@ -413,7 +413,7 @@ export default function OverviewPage() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {/* Top Clients */}
             {topClients.length > 0 && (
-              <div className="bg-[#100c1e] neon-card rounded-2xl p-4">
+              <div className="bg-[var(--surface-2)] neon-card rounded-2xl p-4">
                 <div className="flex items-center gap-2 mb-4">
                   <span className="text-sm font-semibold text-[var(--muted-2)]">Top 5 Clients</span>
                   <InfoTooltip text="Clients mit den meisten DNS-Anfragen laut Query-Log." />
@@ -422,14 +422,14 @@ export default function OverviewPage() {
                   {topClients.map((c, i) => (
                     <div key={c.client}>
                       <div className="flex items-center justify-between text-xs mb-1">
-                        <span className="text-violet-400 font-mono truncate max-w-[60%]">
+                        <span className="text-amber-400 font-mono truncate max-w-[60%]">
                           {i + 1}. {c.client}
                         </span>
                         <span className="text-[var(--muted-2)]">{fmtNum(c.count)}</span>
                       </div>
-                      <div className="h-1.5 bg-[#2a1f42] rounded-full overflow-hidden">
+                      <div className="h-1.5 bg-[var(--border)] rounded-full overflow-hidden">
                         <div
-                          className="h-full bg-violet-500 rounded-full"
+                          className="h-full bg-amber-500 rounded-full"
                           style={{ width: `${(c.count / maxClientCount) * 100}%` }}
                         />
                       </div>
@@ -441,7 +441,7 @@ export default function OverviewPage() {
 
             {/* Top blocked domains */}
             {topBlocked.length > 0 && (
-              <div className="bg-[#100c1e] neon-card rounded-2xl p-4">
+              <div className="bg-[var(--surface-2)] neon-card rounded-2xl p-4">
                 <div className="flex items-center gap-2 mb-4">
                   <span className="text-sm font-semibold text-[var(--muted-2)]">Top 5 blockierte Domains</span>
                   <InfoTooltip text="Domains, die am häufigsten durch die Blocklist geblockt wurden." />
@@ -455,7 +455,7 @@ export default function OverviewPage() {
                         </span>
                         <span className="text-[var(--muted-2)]">{fmtNum(d.count)}</span>
                       </div>
-                      <div className="h-1.5 bg-[#2a1f42] rounded-full overflow-hidden">
+                      <div className="h-1.5 bg-[var(--border)] rounded-full overflow-hidden">
                         <div
                           className="h-full bg-red-500/70 rounded-full"
                           style={{ width: `${(d.count / maxBlockedCount) * 100}%` }}
@@ -471,27 +471,27 @@ export default function OverviewPage() {
 
         {/* Queries per hour (BarChart) */}
         {qphChartData.length > 0 && (
-          <div className="bg-[#100c1e] neon-card rounded-2xl p-4">
+          <div className="bg-[var(--surface-2)] neon-card rounded-2xl p-4">
             <div className="flex items-center gap-2 mb-4">
               <span className="text-sm font-semibold text-[var(--muted-2)]">Anfragen pro Stunde</span>
               <InfoTooltip text="Anzahl der DNS-Anfragen je Stunde aus dem Query-Log." />
             </div>
             <ResponsiveContainer width="100%" height={160}>
               <BarChart data={qphChartData} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#2a1f42" vertical={false} />
+                <CartesianGrid strokeDasharray="3 3" stroke="#2A2A34" vertical={false} />
                 <XAxis
                   dataKey="hour"
-                  tick={{ fill: '#6b5f8a', fontSize: 11 }}
+                  tick={{ fill: '#5A5A6E', fontSize: 11 }}
                   tickLine={false}
                   axisLine={false}
                 />
                 <YAxis
-                  tick={{ fill: '#6b5f8a', fontSize: 11 }}
+                  tick={{ fill: '#5A5A6E', fontSize: 11 }}
                   tickLine={false}
                   axisLine={false}
                 />
-                <Tooltip contentStyle={CHART_TOOLTIP_STYLE} labelStyle={{ color: '#f0eeff' }} />
-                <Bar dataKey="count" fill="#a855f7" name="Anfragen" radius={[3, 3, 0, 0]} />
+                <Tooltip contentStyle={CHART_TOOLTIP_STYLE} labelStyle={{ color: '#F4F4EF' }} />
+                <Bar dataKey="count" fill="#F59E0B" name="Anfragen" radius={[3, 3, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -499,7 +499,7 @@ export default function OverviewPage() {
 
         {/* Charts — Record types + Blocklist */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <div className="bg-[#100c1e] neon-card rounded-2xl p-4">
+          <div className="bg-[var(--surface-2)] neon-card rounded-2xl p-4">
             <div className="flex items-center gap-2 mb-4">
               <span className="text-sm font-semibold text-[var(--muted-2)]">Record-Typen Verteilung</span>
               <InfoTooltip text="Verteilung der DNS-Record-Typen über alle konfigurierten Zonen." />
@@ -512,8 +512,8 @@ export default function OverviewPage() {
                       <Cell key={i} fill={COLORS[i % COLORS.length] + 'CC'} />
                     ))}
                   </Pie>
-                  <Tooltip contentStyle={CHART_TOOLTIP_STYLE} labelStyle={{ color: '#f0eeff' }} />
-                  <Legend iconType="circle" wrapperStyle={{ fontSize: 12, color: '#9a8cbf' }} />
+                  <Tooltip contentStyle={CHART_TOOLTIP_STYLE} labelStyle={{ color: '#F4F4EF' }} />
+                  <Legend iconType="circle" wrapperStyle={{ fontSize: 12, color: '#9A9AAE' }} />
                 </PieChart>
               </ResponsiveContainer>
             ) : (
@@ -523,7 +523,7 @@ export default function OverviewPage() {
             )}
           </div>
 
-          <div className="bg-[#100c1e] neon-card rounded-2xl p-4">
+          <div className="bg-[var(--surface-2)] neon-card rounded-2xl p-4">
             <div className="flex items-center gap-2 mb-4">
               <span className="text-sm font-semibold text-[var(--muted-2)]">Blocklist-URLs Status</span>
               <InfoTooltip text="Verhältnis aktiver zu inaktiver Blocklist-Quell-URLs." />
@@ -536,8 +536,8 @@ export default function OverviewPage() {
                       <Cell key={i} fill={COLORS[i % COLORS.length] + 'CC'} />
                     ))}
                   </Pie>
-                  <Tooltip contentStyle={CHART_TOOLTIP_STYLE} labelStyle={{ color: '#f0eeff' }} />
-                  <Legend iconType="circle" wrapperStyle={{ fontSize: 12, color: '#9a8cbf' }} />
+                  <Tooltip contentStyle={CHART_TOOLTIP_STYLE} labelStyle={{ color: '#F4F4EF' }} />
+                  <Legend iconType="circle" wrapperStyle={{ fontSize: 12, color: '#9A9AAE' }} />
                 </PieChart>
               </ResponsiveContainer>
             ) : (
@@ -549,32 +549,32 @@ export default function OverviewPage() {
         </div>
 
         {/* Zones Table */}
-        <div className="bg-[#100c1e] neon-card rounded-2xl overflow-hidden">
-          <div className="flex items-center justify-between px-5 py-4 border-b border-[#2a1f42]">
+        <div className="bg-[var(--surface-2)] neon-card rounded-2xl overflow-hidden">
+          <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border)]">
             <h3 className="text-sm font-semibold text-[var(--text)]">Zonen</h3>
             <button
               onClick={() => router.push('/dashboard/zones/')}
-              className="text-xs text-violet-400 hover:text-violet-300 font-medium"
+              className="text-xs text-amber-400 hover:text-amber-400 font-medium"
             >
               + Zone
             </button>
           </div>
           {zoneList.length > 0 ? (
-            <div className="divide-y divide-[#080612]">
+            <div className="divide-y divide-[var(--surface)]">
               {zoneList.slice(0, 10).map((z) => (
                 <div
                   key={z.domain}
-                  className="flex items-center justify-between px-5 py-3 hover:bg-[#1a1230] transition-colors cursor-pointer"
+                  className="flex items-center justify-between px-5 py-3 hover:bg-[var(--surface-3)] transition-colors cursor-pointer"
                   onClick={() => router.push(`/dashboard/zones/?d=${encodeURIComponent(z.domain)}`)}
                 >
                   <div>
-                    <div className="text-sm font-medium text-violet-400">{z.domain}</div>
+                    <div className="text-sm font-medium text-amber-400">{z.domain}</div>
                     <div className="text-xs text-[var(--muted)]">
                       {(z.records ?? []).length} Records · TTL {z.ttl ?? 3600}
                     </div>
                   </div>
                   <button
-                    className="text-xs text-[var(--muted)] hover:text-[var(--muted-2)] px-2 py-1 rounded border border-[#2a1f42] hover:border-[#6b5f8a] transition-colors"
+                    className="text-xs text-[var(--muted)] hover:text-[var(--muted-2)] px-2 py-1 rounded border border-[var(--border)] hover:border-[var(--muted)] transition-colors"
                     onClick={(e) => {
                       e.stopPropagation()
                       router.push(`/dashboard/zones/?d=${encodeURIComponent(z.domain)}`)
@@ -592,7 +592,7 @@ export default function OverviewPage() {
               <div className="text-xs text-[var(--muted)]">Erstelle die erste DNS-Zone</div>
               <button
                 onClick={() => router.push('/dashboard/zones/')}
-                className="mt-2 px-4 py-2 rounded-xl bg-violet-500/20 text-violet-400 text-sm font-medium hover:bg-violet-500/30 transition-colors"
+                className="mt-2 px-4 py-2 rounded-xl bg-amber-500/10 text-amber-400 text-sm font-medium hover:bg-amber-500/10 transition-colors"
               >
                 + Zone hinzufügen
               </button>
@@ -601,12 +601,12 @@ export default function OverviewPage() {
         </div>
 
         {/* Blocklist URLs */}
-        <div className="bg-[#100c1e] neon-card rounded-2xl overflow-hidden">
-          <div className="flex items-center justify-between px-5 py-4 border-b border-[#2a1f42]">
+        <div className="bg-[var(--surface-2)] neon-card rounded-2xl overflow-hidden">
+          <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border)]">
             <h3 className="text-sm font-semibold text-[var(--text)]">Blocklist-URLs</h3>
             <button
               onClick={() => router.push('/dashboard/blocklist/')}
-              className="text-xs text-violet-400 hover:text-violet-300 font-medium"
+              className="text-xs text-amber-400 hover:text-amber-400 font-medium"
             >
               Verwalten
             </button>
@@ -615,7 +615,7 @@ export default function OverviewPage() {
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-[#2a1f42]">
+                  <tr className="border-b border-[var(--border)]">
                     {['URL', 'Status', 'Letzter Abruf'].map((h) => (
                       <th key={h} className="px-5 py-2 text-left text-xs font-semibold uppercase tracking-wider text-[var(--muted-2)]">
                         {h}
@@ -623,15 +623,15 @@ export default function OverviewPage() {
                     ))}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-[#080612]">
+                <tbody className="divide-y divide-[var(--surface)]">
                   {blUrls.slice(0, 8).map((u) => (
-                    <tr key={u.id} className="hover:bg-[#1a1230] transition-colors">
+                    <tr key={u.id} className="hover:bg-[var(--surface-3)] transition-colors">
                       <td className="px-5 py-2.5 max-w-xs">
                         <a
                           href={u.url}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="text-violet-400 hover:text-violet-300 truncate block text-xs"
+                          className="text-amber-400 hover:text-amber-400 truncate block text-xs"
                         >
                           {u.url}
                         </a>
@@ -658,7 +658,7 @@ export default function OverviewPage() {
               <div className="text-xs text-[var(--muted)]">Noch keine Blocklist-URLs konfiguriert</div>
               <button
                 onClick={() => router.push('/dashboard/blocklist/')}
-                className="mt-1 text-xs text-violet-400 hover:text-violet-300"
+                className="mt-1 text-xs text-amber-400 hover:text-amber-400"
               >
                 Blocklist einrichten →
               </button>

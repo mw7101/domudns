@@ -461,6 +461,12 @@ func main() {
 		dhcpAPIHandler = api.NewDHCPHandler(dhcpSyncManager)
 	}
 
+	// Cache management API handler
+	var cacheAPIHandler *api.CacheHandler
+	if cfg.DNSServer.Cache.Enabled {
+		cacheAPIHandler = api.NewCacheHandler(dnsServer.GetCache())
+	}
+
 	// HTTP Server
 	opts := caddy.ServerOptions{
 		ClusterHandler:      clusterHandler,
@@ -473,6 +479,7 @@ func main() {
 		DDNSAPIHandler:      ddnsAPIHandler,
 		SplitHorizonHandler: splitHorizonHandler,
 		DHCPHandler:         dhcpAPIHandler,
+		CacheHandler:        cacheAPIHandler,
 	}
 	httpServer := caddy.NewServerWithOptions(cfg, authManager, store, configStore, blocklistReloader, zoneReloader, opts)
 

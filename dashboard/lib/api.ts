@@ -80,6 +80,17 @@ export interface Zone {
   ttl: number
   ttl_override?: number // 0 or absent = no override; >0 = all response TTLs for this zone are normalized
   records: DnsRecord[]
+  soa?: SOA
+}
+
+export interface SOA {
+  mname: string
+  rname: string
+  serial: number
+  refresh: number
+  retry: number
+  expire: number
+  minimum: number
 }
 
 export interface SplitHorizonView {
@@ -238,6 +249,13 @@ export const zones = {
       method: 'POST',
       body: JSON.stringify({ server, domain, view: view ?? '' }),
     }),
+
+  update: (domain: string, zone: Zone, view?: string): Promise<{ data: Zone }> => {
+    const url = view
+      ? '/zones/' + encodeURIComponent(domain) + '?view=' + encodeURIComponent(view)
+      : '/zones/' + encodeURIComponent(domain)
+    return request<{ data: Zone }>(url, { method: 'PUT', body: JSON.stringify(zone) })
+  },
 }
 
 // ─── Records ─────────────────────────────────────────────────────────────────
@@ -304,6 +322,37 @@ export const blocklist = {
     }),
   deletePattern: (id: number) =>
     request<void>('/blocklist/patterns/' + id, { method: 'DELETE' }),
+}
+
+// ─── Cache ────────────────────────────────────────────────────────────────────
+
+export interface CacheEntryInfo {
+  name: string
+  type: string
+  remaining_ttl: number
+  expires_at: number
+  cached_at: number
+}
+
+export interface CacheStats {
+  entries: number
+  hits: number
+  misses: number
+  hit_rate: number
+  entry_list: CacheEntryInfo[]
+}
+
+export const cache = {
+  stats: () => request<{ data: CacheStats }>('/cache'),
+  flush: () => request<{ data: { status: string } }>('/cache', { method: 'DELETE' }),
+  deleteEntry: (name: string, type: string) =>
+    request<void>(
+      '/cache/' +
+        encodeURIComponent(name.replace(/\.$/, '')) +
+        '/' +
+        encodeURIComponent(type),
+      { method: 'DELETE' }
+    ),
 }
 
 // ─── Config ───────────────────────────────────────────────────────────────────

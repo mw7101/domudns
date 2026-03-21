@@ -3,6 +3,8 @@ package dnsserver
 import (
 	"container/heap"
 	"fmt"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,6 +17,7 @@ type CacheEntry struct {
 	key        string
 	response   *dns.Msg
 	expiresAt  time.Time
+	cachedAt   time.Time // timestamp when the entry was first stored
 	accessTime time.Time // for LRU eviction
 	heapIdx    int       // position in lruHeap (-1 = not in heap)
 }
@@ -56,6 +59,15 @@ type CacheManager struct {
 	misses      uint64
 }
 
+// CacheEntryInfo is the JSON-serializable view of a cache entry for the API.
+type CacheEntryInfo struct {
+	Name         string `json:"name"`
+	Type         string `json:"type"`
+	RemainingTTL int    `json:"remaining_ttl"` // seconds
+	ExpiresAt    int64  `json:"expires_at"`    // Unix timestamp
+	CachedAt     int64  `json:"cached_at"`     // Unix timestamp
+}
+
 // NewCacheManager creates a new cache manager.
 func NewCacheManager(maxEntries int, defaultTTL, negativeTTL time.Duration) *CacheManager {
 	if maxEntries <= 0 {
@@ -80,6 +92,7 @@ func NewCacheManager(maxEntries int, defaultTTL, negativeTTL time.Duration) *Cac
 }
 
 // Get retrieves a cached response if available and not expired.
+// The returned message has TTLs decremented by the elapsed time since caching (RFC 1035).
 func (c *CacheManager) Get(qname string, qtype uint16) *dns.Msg {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -103,8 +116,8 @@ func (c *CacheManager) Get(qname string, qtype uint16) *dns.Msg {
 	heap.Fix(&c.lru, entry.heapIdx)
 	c.hits++
 
-	// Return a copy to avoid mutation
-	return entry.response.Copy()
+	// Return a copy with TTLs decremented by elapsed time since caching
+	return decrementTTLs(entry.response, time.Since(entry.cachedAt))
 }
 
 // Set stores a DNS response in the cache.
@@ -129,6 +142,7 @@ func (c *CacheManager) Set(qname string, qtype uint16, response *dns.Msg) {
 	if existing, ok := c.entries[key]; ok {
 		existing.response = response.Copy()
 		existing.expiresAt = now.Add(ttl)
+		existing.cachedAt = now
 		existing.accessTime = now
 		heap.Fix(&c.lru, existing.heapIdx)
 		return
@@ -144,11 +158,103 @@ func (c *CacheManager) Set(qname string, qtype uint16, response *dns.Msg) {
 		key:        key,
 		response:   response.Copy(),
 		expiresAt:  now.Add(ttl),
+		cachedAt:   now,
 		accessTime: now,
 		heapIdx:    -1,
 	}
 	c.entries[key] = entry
 	heap.Push(&c.lru, entry)
+}
+
+// Flush removes all cached entries and resets hit/miss counters.
+func (c *CacheManager) Flush() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.entries = make(map[string]*CacheEntry, c.maxEntries)
+	c.lru = make(lruHeap, 0, c.maxEntries)
+	heap.Init(&c.lru)
+	c.hits = 0
+	c.misses = 0
+	log.Info().Msg("cache flushed")
+}
+
+// Delete removes the cache entry for the given qname and qtype.
+// Returns true if the entry existed and was removed.
+func (c *CacheManager) Delete(qname string, qtype uint16) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	key := cacheKey(qname, qtype)
+	entry, ok := c.entries[key]
+	if !ok {
+		return false
+	}
+	c.removeEntry(entry)
+	return true
+}
+
+// Entries returns a snapshot of up to limit non-expired entries, sorted by remaining TTL ascending.
+// A limit of 0 returns all entries.
+func (c *CacheManager) Entries(limit int) []CacheEntryInfo {
+	c.mu.Lock()
+	now := time.Now()
+	infos := make([]CacheEntryInfo, 0, len(c.entries))
+	for _, entry := range c.entries {
+		if now.After(entry.expiresAt) {
+			continue
+		}
+		remaining := int(entry.expiresAt.Sub(now).Seconds())
+		if remaining < 0 {
+			remaining = 0
+		}
+		parts := strings.SplitN(entry.key, ":", 2)
+		name, qtype := "", ""
+		if len(parts) == 2 {
+			name, qtype = parts[0], parts[1]
+		}
+		infos = append(infos, CacheEntryInfo{
+			Name:         name,
+			Type:         qtype,
+			RemainingTTL: remaining,
+			ExpiresAt:    entry.expiresAt.Unix(),
+			CachedAt:     entry.cachedAt.Unix(),
+		})
+	}
+	c.mu.Unlock()
+
+	// Sort by remaining TTL ascending (shortest-lived first)
+	sort.Slice(infos, func(i, j int) bool {
+		return infos[i].RemainingTTL < infos[j].RemainingTTL
+	})
+
+	if limit > 0 && len(infos) > limit {
+		infos = infos[:limit]
+	}
+	return infos
+}
+
+// decrementTTLs returns a copy of msg with all RR TTLs in Answer, Ns, and Extra
+// reduced by elapsed. TTLs floor at 1 to avoid confusing client-side caching.
+// OPT pseudo-records (EDNS0) are excluded.
+func decrementTTLs(msg *dns.Msg, elapsed time.Duration) *dns.Msg {
+	elapsedSec := uint32(elapsed.Seconds())
+	if elapsedSec == 0 {
+		return msg.Copy()
+	}
+	m := msg.Copy()
+	for _, rr := range append(append(m.Answer, m.Ns...), m.Extra...) {
+		hdr := rr.Header()
+		if hdr.Rrtype == dns.TypeOPT {
+			continue // EDNS0 meta-record, no meaningful TTL
+		}
+		if hdr.Ttl > elapsedSec {
+			hdr.Ttl -= elapsedSec
+		} else {
+			hdr.Ttl = 1 // floor at 1: TTL=0 would bypass client caches
+		}
+	}
+	return m
 }
 
 // determineTTL determines the cache TTL for a response.

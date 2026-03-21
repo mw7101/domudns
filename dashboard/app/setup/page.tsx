@@ -58,17 +58,17 @@ export default function SetupPage() {
 
   if (apiKey) {
     return (
-      <div className="min-h-screen bg-[#080612] flex items-center justify-center p-4">
+      <div className="min-h-screen bg-[var(--surface)] flex items-center justify-center p-4">
         <motion.div
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
-          className="w-full max-w-md bg-[#100c1e] neon-card rounded-2xl p-8"
+          className="w-full max-w-md bg-[var(--surface-2)] neon-card rounded-2xl p-8"
         >
           <h1 className="text-xl font-bold text-green-400 mb-3">✓ Setup abgeschlossen</h1>
-          <p className="text-sm text-[#9a8cbf] mb-4">
+          <p className="text-sm text-[var(--muted-2)] mb-4">
             Ihr API-Key wurde generiert. Er wird nur einmalig angezeigt — bitte jetzt sichern!
           </p>
-          <div className="bg-[#080612] neon-card rounded-xl p-4 font-mono text-sm text-violet-300 break-all mb-4">
+          <div className="bg-[var(--surface)] neon-card rounded-xl p-4 font-mono text-sm text-amber-300 break-all mb-4">
             {apiKey}
           </div>
           <div className="flex items-center gap-2 px-4 py-3 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-300 text-sm mb-6">
@@ -76,7 +76,7 @@ export default function SetupPage() {
           </div>
           <button
             onClick={() => router.push('/login/')}
-            className="w-full py-2.5 rounded-xl bg-gradient-to-r from-violet-500 to-purple-600 text-white font-semibold text-sm hover:opacity-90 transition-opacity"
+            className="w-full py-2.5 rounded-xl bg-gradient-to-r from-amber-600 to-amber-500 text-white font-semibold text-sm hover:opacity-90 transition-opacity"
           >
             Zum Login →
           </button>
@@ -86,25 +86,25 @@ export default function SetupPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#080612] flex items-center justify-center p-4">
+    <div className="min-h-screen bg-[var(--surface)] flex items-center justify-center p-4">
       <motion.div
         initial={{ opacity: 0, y: 16 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
         className="w-full max-w-sm"
       >
-        <div className="bg-[#100c1e] neon-card rounded-2xl p-8">
+        <div className="bg-[var(--surface-2)] neon-card rounded-2xl p-8">
           {/* Header */}
           <div className="text-center mb-7">
-            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-violet-500 to-purple-700 flex items-center justify-center mx-auto mb-4 shadow-lg shadow-violet-500/30">
+            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-amber-600 to-amber-500 flex items-center justify-center mx-auto mb-4 shadow-lg shadow-amber-500/20">
               <DomULogoIcon size={34} />
             </div>
-            <h1 className="text-xl font-bold text-[#f0eeff] mb-1">DomU DNS Setup</h1>
-            <p className="text-sm text-[#6b5f8a]">Ersteinrichtung des Admin-Accounts</p>
+            <h1 className="text-xl font-bold text-[var(--text)] mb-1">DomU DNS Setup</h1>
+            <p className="text-sm text-[var(--muted)]">Ersteinrichtung des Admin-Accounts</p>
           </div>
 
           {/* Info */}
-          <div className="flex items-start gap-2 px-4 py-3 rounded-xl border border-violet-500/30 bg-violet-500/10 text-violet-300 text-sm mb-5">
+          <div className="flex items-start gap-2 px-4 py-3 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-300 text-sm mb-5">
             <span className="mt-0.5">ℹ</span>
             <span>Willkommen! Legen Sie jetzt Ihren Admin-Account und API-Key fest. Der API-Key wird nur einmalig angezeigt.</span>
           </div>
@@ -119,7 +119,7 @@ export default function SetupPage() {
           {/* Form */}
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="block text-xs font-semibold text-[#9a8cbf] uppercase tracking-wider mb-2">
+              <label className="block text-xs font-semibold text-[var(--muted-2)] uppercase tracking-wider mb-2">
                 Benutzername
               </label>
               <input
@@ -127,11 +127,11 @@ export default function SetupPage() {
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 required
-                className="w-full px-4 py-2.5 rounded-xl bg-[#080612] border border-[#2a1f42] text-[#f0eeff] text-sm focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500 transition-colors"
+                className="w-full px-4 py-2.5 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] text-sm focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500/50 transition-colors"
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-[#9a8cbf] uppercase tracking-wider mb-2">
+              <label className="block text-xs font-semibold text-[var(--muted-2)] uppercase tracking-wider mb-2">
                 Neues Passwort
               </label>
               <input
@@ -141,11 +141,11 @@ export default function SetupPage() {
                 placeholder="Mindestens 8 Zeichen"
                 autoFocus
                 required
-                className="w-full px-4 py-2.5 rounded-xl bg-[#080612] border border-[#2a1f42] text-[#f0eeff] text-sm focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500 transition-colors"
+                className="w-full px-4 py-2.5 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] text-sm focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500/50 transition-colors"
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-[#9a8cbf] uppercase tracking-wider mb-2">
+              <label className="block text-xs font-semibold text-[var(--muted-2)] uppercase tracking-wider mb-2">
                 Passwort bestätigen
               </label>
               <input
@@ -154,7 +154,7 @@ export default function SetupPage() {
                 onChange={(e) => setPassword2(e.target.value)}
                 placeholder="Passwort wiederholen"
                 required
-                className="w-full px-4 py-2.5 rounded-xl bg-[#080612] border border-[#2a1f42] text-[#f0eeff] text-sm focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500 transition-colors"
+                className="w-full px-4 py-2.5 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] text-sm focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500/50 transition-colors"
               />
             </div>
             <label className="flex items-center gap-3 cursor-pointer">
@@ -162,9 +162,9 @@ export default function SetupPage() {
                 type="checkbox"
                 checked={generateKey}
                 onChange={(e) => setGenerateKey(e.target.checked)}
-                className="w-4 h-4 rounded border-[#2a1f42] bg-[#080612] text-violet-500 focus:ring-violet-500"
+                className="w-4 h-4 rounded border-[var(--border)] bg-[var(--surface)] text-amber-500 focus:ring-amber-500"
               />
-              <span className="text-sm text-[#9a8cbf]">API-Key generieren (für curl/Scripts)</span>
+              <span className="text-sm text-[var(--muted-2)]">API-Key generieren (für curl/Scripts)</span>
             </label>
             <MovingBorderButton type="submit" disabled={loading} className="w-full py-2.5 mt-2">
               {loading ? 'Einrichten …' : 'Setup abschließen →'}

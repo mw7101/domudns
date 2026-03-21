@@ -12,7 +12,7 @@ import {
 } from 'recharts'
 import { InfoTooltip } from '@/components/shared/InfoTooltip'
 
-const COLORS = ['#a855f7', '#22c55e', '#f59e0b', '#ef4444', '#c084fc', '#7c3aed']
+const COLORS = ['#F59E0B', '#22c55e', '#f59e0b', '#ef4444', '#FCD34D', '#D97706']
 
 interface MetricsSample {
   ts: number
@@ -174,7 +174,7 @@ export default function MonitoringPage() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="w-6 h-6 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" />
+        <div className="w-6 h-6 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
       </div>
     )
   }
@@ -202,10 +202,10 @@ export default function MonitoringPage() {
         <section>
           <div className="mb-3">
             <div className="flex items-center gap-2">
-              <h2 className="text-base font-semibold text-[#f0eeff]">DNS Metriken</h2>
+              <h2 className="text-base font-semibold text-[var(--text)]">DNS Metriken</h2>
               <InfoTooltip text="Alle benutzerdefinierten Prometheus-Metriken des DNS-Stacks." />
             </div>
-            <p className="text-xs text-[#6b5f8a]">Live-Daten · Alle 30 Sekunden aktualisiert</p>
+            <p className="text-xs text-[var(--muted)]">Live-Daten · Alle 30 Sekunden aktualisiert</p>
           </div>
           <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
             <KpiCard
@@ -256,10 +256,10 @@ export default function MonitoringPage() {
         {/* Charts */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {/* History chart with time range selector */}
-          <div className="lg:col-span-2 bg-[#100c1e] neon-card rounded-2xl p-4">
+          <div className="lg:col-span-2 bg-[var(--surface-2)] neon-card rounded-2xl p-4">
             <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
               <div className="flex items-center gap-2">
-                <span className="text-sm font-semibold text-[#9a8cbf]">
+                <span className="text-sm font-semibold text-[var(--muted-2)]">
                   Verlauf — {RANGE_LABELS[range]}
                 </span>
                 <InfoTooltip text="Anfragen/s, Blockiert/s, Cache-Treffer/s und Fehler/s aus dem Backend-Ring-Buffer." />
@@ -272,8 +272,8 @@ export default function MonitoringPage() {
                     className={cn(
                       'px-3 py-1 text-xs rounded-lg transition-colors',
                       range === r
-                        ? 'bg-violet-600 text-white'
-                        : 'bg-[#080612] text-[#6b5f8a] hover:text-[#f0eeff]'
+                        ? 'bg-amber-500 text-white'
+                        : 'bg-[var(--surface)] text-[var(--muted)] hover:text-[var(--text)]'
                     )}
                   >
                     {RANGE_LABELS[r]}
@@ -284,23 +284,23 @@ export default function MonitoringPage() {
             {dayChartData.length >= 2 ? (
               <ResponsiveContainer width="100%" height={200}>
                 <LineChart data={dayChartData}>
-                  <CartesianGrid stroke="#1a1230" strokeDasharray="3 3" />
-                  <XAxis dataKey="time" tick={{ fill: '#6b5f8a', fontSize: 10 }} interval="preserveStartEnd" />
-                  <YAxis tick={{ fill: '#6b5f8a', fontSize: 11 }} />
+                  <CartesianGrid stroke="#1C1C23" strokeDasharray="3 3" />
+                  <XAxis dataKey="time" tick={{ fill: '#5A5A6E', fontSize: 10 }} interval="preserveStartEnd" />
+                  <YAxis tick={{ fill: '#5A5A6E', fontSize: 11 }} />
                   <Tooltip
-                    contentStyle={{ background: '#100c1e', border: '1px solid #2a1f42', borderRadius: 8 }}
-                    labelStyle={{ color: '#f0eeff' }}
+                    contentStyle={{ background: 'var(--surface-2)', border: '1px solid #2A2A34', borderRadius: 8 }}
+                    labelStyle={{ color: '#F4F4EF' }}
                     formatter={(v: number) => v.toFixed(3) + '/s'}
                   />
-                  <Line type="monotone" dataKey="queries" stroke="#a855f7" strokeWidth={2} dot={false} name="Anfragen/s" />
+                  <Line type="monotone" dataKey="queries" stroke="#F59E0B" strokeWidth={2} dot={false} name="Anfragen/s" />
                   <Line type="monotone" dataKey="blocked" stroke="#ef4444" strokeWidth={1.5} dot={false} name="Blockiert/s" />
                   <Line type="monotone" dataKey="cached" stroke="#22c55e" strokeWidth={1.5} dot={false} name="Cache/s" />
                   <Line type="monotone" dataKey="errors" stroke="#f59e0b" strokeWidth={1.5} dot={false} name="Fehler/s" />
-                  <Legend iconType="circle" wrapperStyle={{ fontSize: 12, color: '#9a8cbf' }} />
+                  <Legend iconType="circle" wrapperStyle={{ fontSize: 12, color: '#9A9AAE' }} />
                 </LineChart>
               </ResponsiveContainer>
             ) : (
-              <div className="flex items-center justify-center h-48 text-[#6b5f8a] text-sm text-center px-4">
+              <div className="flex items-center justify-center h-48 text-[var(--muted)] text-sm text-center px-4">
                 Noch keine Daten für {RANGE_LABELS[range]} — Verlauf wird aufgebaut
               </div>
             )}
@@ -309,18 +309,18 @@ export default function MonitoringPage() {
 
         {/* DNS Metrics Detail */}
         {allMetrics.length > 0 && (
-          <div className="bg-[#100c1e] neon-card rounded-2xl p-4">
+          <div className="bg-[var(--surface-2)] neon-card rounded-2xl p-4">
             <div className="flex items-center gap-2 mb-4">
-              <span className="text-sm font-semibold text-[#9a8cbf]">DNS Metriken Detail</span>
+              <span className="text-sm font-semibold text-[var(--muted-2)]">DNS Metriken Detail</span>
               <InfoTooltip text="Alle benutzerdefinierten Prometheus-Metriken des DNS-Stacks." />
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
               {allMetrics.map(([name, m]) => (
-                <div key={name} className="bg-[#080612]/60 border border-[#2a1f42]/50 rounded-xl p-3">
-                  <div className="text-xs text-[#6b5f8a] mb-1 truncate">{name}</div>
-                  <div className="text-sm font-bold text-[#f0eeff]">{fmtNum(m.total)}</div>
+                <div key={name} className="bg-[var(--surface)]/60 border border-[var(--border)]/50 rounded-xl p-3">
+                  <div className="text-xs text-[var(--muted)] mb-1 truncate">{name}</div>
+                  <div className="text-sm font-bold text-[var(--text)]">{fmtNum(m.total)}</div>
                   {m.samples.length > 1 && (
-                    <div className="text-xs text-[#6b5f8a] mt-0.5">{m.samples.length} Label-Varianten</div>
+                    <div className="text-xs text-[var(--muted)] mt-0.5">{m.samples.length} Label-Varianten</div>
                   )}
                 </div>
               ))}
@@ -330,18 +330,18 @@ export default function MonitoringPage() {
 
         {/* Go Runtime */}
         {goMetrics.length > 0 && (
-          <div className="bg-[#100c1e] neon-card rounded-2xl p-4">
+          <div className="bg-[var(--surface-2)] neon-card rounded-2xl p-4">
             <div className="flex items-center gap-2 mb-4">
-              <span className="text-sm font-semibold text-[#9a8cbf]">Go Runtime</span>
+              <span className="text-sm font-semibold text-[var(--muted-2)]">Go Runtime</span>
               <InfoTooltip text="Interne Go-Runtime-Metriken: Goroutines, GC, Speicherstatistiken." />
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
               {goMetrics.map(([name, m]) => (
-                <div key={name} className="bg-[#080612]/60 border border-[#2a1f42]/50 rounded-xl p-3">
-                  <div className="text-xs text-[#6b5f8a] mb-1 truncate">
+                <div key={name} className="bg-[var(--surface)]/60 border border-[var(--border)]/50 rounded-xl p-3">
+                  <div className="text-xs text-[var(--muted)] mb-1 truncate">
                     {name.replace(/^(go_|process_)/, '')}
                   </div>
-                  <div className="text-sm font-bold text-[#f0eeff]">
+                  <div className="text-sm font-bold text-[var(--text)]">
                     {name.includes('bytes')
                       ? `${(m.total / 1024 / 1024).toFixed(2)} MB`
                       : name.includes('seconds')
