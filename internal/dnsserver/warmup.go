@@ -7,20 +7,14 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/mw7101/domudns/internal/querylog"
 	"github.com/miekg/dns"
 	"github.com/rs/zerolog/log"
 )
 
-// QueryLogReader is the minimal interface WarmCache needs from the query logger.
-type QueryLogReader interface {
-	Stats() querylog.QueryLogStats
-}
-
 // WarmCache preloads popular domains asynchron into the LRU cache.
 // Data source: Query-Log top domains (priority 1) + defaultWarmupDomains as fallback.
 // Does not block server start — must be called as goroutine.
-func (s *Server) WarmCache(ctx context.Context, qlog QueryLogReader, count int) {
+func (s *Server) WarmCache(ctx context.Context, qlog QueryLogProvider, count int) {
 	if s.cache == nil {
 		return
 	}
@@ -75,7 +69,7 @@ func (s *Server) WarmCache(ctx context.Context, qlog QueryLogReader, count int) 
 
 // collectDomains merges Query-Log top domains (priority 1) with the fallback list,
 // deduplicates entries and limits to max entries.
-func collectDomains(qlog QueryLogReader, fallback []string, max int) []string {
+func collectDomains(qlog QueryLogProvider, fallback []string, max int) []string {
 	seen := make(map[string]struct{})
 	result := make([]string, 0, max)
 

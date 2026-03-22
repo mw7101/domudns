@@ -295,7 +295,7 @@ export default function MonitoringPage() {
                   <Line type="monotone" dataKey="queries" stroke="#F59E0B" strokeWidth={2} dot={false} name="Anfragen/s" />
                   <Line type="monotone" dataKey="blocked" stroke="#ef4444" strokeWidth={1.5} dot={false} name="Blockiert/s" />
                   <Line type="monotone" dataKey="cached" stroke="#22c55e" strokeWidth={1.5} dot={false} name="Cache/s" />
-                  <Line type="monotone" dataKey="errors" stroke="#f59e0b" strokeWidth={1.5} dot={false} name="Fehler/s" />
+                  <Line type="monotone" dataKey="errors" stroke="#f97316" strokeWidth={1.5} dot={false} name="Fehler/s" />
                   <Legend iconType="circle" wrapperStyle={{ fontSize: 12, color: '#9A9AAE' }} />
                 </LineChart>
               </ResponsiveContainer>

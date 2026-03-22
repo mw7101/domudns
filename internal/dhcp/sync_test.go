@@ -287,7 +287,7 @@ func TestAutoReverseZone(t *testing.T) {
 		{"10.0.0.1", "0.0.10.in-addr.arpa"},
 		{"172.16.5.100", "5.16.172.in-addr.arpa"},
 		{"invalid", ""},
-		{"::1", ""}, // IPv6 nicht unterstuetzt
+		{"::1", "0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.ip6.arpa"}, // IPv6 jetzt unterstuetzt
 	}
 	for _, tt := range tests {
 		t.Run(tt.ip, func(t *testing.T) {

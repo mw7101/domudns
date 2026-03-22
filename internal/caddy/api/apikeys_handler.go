@@ -10,11 +10,11 @@ import (
 
 // APIKeysHandler handles CRUD for named API keys at /api/auth/api-keys.
 type APIKeysHandler struct {
-	store NamedAPIKeyStore
+	store store.NamedAPIKeyStore
 }
 
 // NewAPIKeysHandler creates a new named API key handler.
-func NewAPIKeysHandler(s NamedAPIKeyStore) *APIKeysHandler {
+func NewAPIKeysHandler(s store.NamedAPIKeyStore) *APIKeysHandler {
 	return &APIKeysHandler{store: s}
 }
 

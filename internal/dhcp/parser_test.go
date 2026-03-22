@@ -173,6 +173,65 @@ lease 192.168.1.10 {
 	}
 }
 
+// ─── Cross-Parser Tests ──────────────────────────────────────────────────────
+
+// TestAllParsers verifies that dhcpd and dnsmasq parsers produce leases with
+// the same IP and MAC when given identical lease data in their respective formats.
+func TestAllParsers(t *testing.T) {
+	const (
+		wantIP  = "192.168.1.100"
+		wantMAC = "de:ad:be:ef:00:01"
+	)
+
+	dir := t.TempDir()
+
+	// dnsmasq format: "0 <mac> <ip> <hostname>" — timestamp 0 = static/never expires
+	dnsmasqContent := fmt.Sprintf("0 %s %s testhost\n", wantMAC, wantIP)
+	dnsmasqPath := filepath.Join(dir, "dnsmasq.leases")
+	if err := os.WriteFile(dnsmasqPath, []byte(dnsmasqContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// dhcpd format — "ends never" = never expires
+	dhcpdContent := fmt.Sprintf(`lease %s {
+  starts 1 2030/01/01 00:00:00;
+  ends never;
+  hardware ethernet %s;
+  client-hostname "testhost";
+}
+`, wantIP, wantMAC)
+	dhcpdPath := filepath.Join(dir, "dhcpd.leases")
+	if err := os.WriteFile(dhcpdPath, []byte(dhcpdContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	parsers := []struct {
+		name   string
+		parser LeaseParser
+	}{
+		{"dnsmasq", &DnsmasqParser{Path: dnsmasqPath}},
+		{"dhcpd", &DhcpdParser{Path: dhcpdPath}},
+	}
+
+	for _, tc := range parsers {
+		t.Run(tc.name, func(t *testing.T) {
+			leases, err := tc.parser.Parse(context.Background())
+			if err != nil {
+				t.Fatalf("%s: Parse error: %v", tc.name, err)
+			}
+			if len(leases) != 1 {
+				t.Fatalf("%s: expected 1 lease, got %d", tc.name, len(leases))
+			}
+			if leases[0].IP != wantIP {
+				t.Errorf("%s: IP = %q, want %q", tc.name, leases[0].IP, wantIP)
+			}
+			if leases[0].MAC != wantMAC {
+				t.Errorf("%s: MAC = %q, want %q", tc.name, leases[0].MAC, wantMAC)
+			}
+		})
+	}
+}
+
 // ─── sanitizeHostname Tests ─────────────────────────────────────────────────
 
 func TestSanitizeHostname(t *testing.T) {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -175,7 +174,7 @@ func (sm *SyncManager) syncOnce(ctx context.Context) {
 	if reverseZone == "" && len(newMap) > 0 {
 		// Auto-derive from first IP
 		for ip := range newMap {
-			reverseZone = autoReverseZone(ip)
+			reverseZone, _ = dns.ReverseZoneForIP(ip)
 			break
 		}
 	}
@@ -306,23 +305,29 @@ func (sm *SyncManager) createRecords(ctx context.Context, lease Lease, reverseZo
 	}
 	tracked.ARecordID = aRecord.ID
 
-	// Create PTR record (if reverse zone exists)
-	if reverseZone != "" {
-		ptrName := ptrName(lease.IP, reverseZone)
-		ptrRecord := &dns.Record{
-			Name:  ptrName,
-			Type:  dns.TypePTR,
-			TTL:   sm.ttl,
-			Value: lease.Hostname + "." + sm.zone,
-		}
-		if err := sm.store.PutRecord(ctx, reverseZone, ptrRecord); err != nil {
-			log.Warn().Err(err).
-				Str("hostname", lease.Hostname).
-				Str("ip", lease.IP).
-				Msg("dhcp sync: PTR-Record erstellen fehlgeschlagen")
-		} else {
-			tracked.PTRRecordID = ptrRecord.ID
-		}
+	// Create PTR record — compute per-lease reverse zone (supports IPv4 + IPv6)
+	ptrZone, ok := dns.ReverseZoneForIP(lease.IP)
+	if !ok {
+		log.Warn().Str("ip", lease.IP).Msg("dhcp sync: Reverse-Zone fuer IP nicht bestimmbar")
+		return tracked
+	}
+	if err := sm.ensureZone(ctx, ptrZone); err != nil {
+		log.Warn().Err(err).Str("zone", ptrZone).Msg("dhcp sync: Reverse-Zone nicht verfuegbar, PTR uebersprungen")
+		return tracked
+	}
+	ptrRecord := &dns.Record{
+		Name:  dns.PTRNameForIP(lease.IP),
+		Type:  dns.TypePTR,
+		TTL:   sm.ttl,
+		Value: lease.Hostname + "." + sm.zone,
+	}
+	if err := sm.store.PutRecord(ctx, ptrZone, ptrRecord); err != nil {
+		log.Warn().Err(err).
+			Str("hostname", lease.Hostname).
+			Str("ip", lease.IP).
+			Msg("dhcp sync: PTR-Record erstellen fehlgeschlagen")
+	} else {
+		tracked.PTRRecordID = ptrRecord.ID
 	}
 
 	return tracked
@@ -405,45 +410,15 @@ func (sm *SyncManager) saveState() {
 	}
 }
 
-// autoReverseZone derives the reverse zone from an IPv4 address.
-// Beispiel: "192.168.100.42" → "100.168.192.in-addr.arpa"
-func autoReverseZone(ip string) string {
-	parsed := net.ParseIP(ip)
-	if parsed == nil {
-		return ""
-	}
-	p4 := parsed.To4()
-	if p4 == nil {
-		return "" // IPv6 not supported
-	}
-	return fmt.Sprintf("%d.%d.%d.in-addr.arpa", p4[2], p4[1], p4[0])
-}
-
-// ptrName computes the PTR record name (last octet of IP).
-// Beispiel: IP "192.168.100.42", Zone "100.168.192.in-addr.arpa" → "42"
-func ptrName(ip, reverseZone string) string {
-	parsed := net.ParseIP(ip)
-	if parsed == nil {
-		return ""
-	}
-	p4 := parsed.To4()
-	if p4 == nil {
-		return ""
-	}
-
-	// For /24 reverse zone: only last octet
-	_ = reverseZone
-	return fmt.Sprintf("%d", p4[3])
-}
-
-// AutoReverseZone is the exported version for tests.
+// AutoReverseZone is exported for tests — delegates to dns.ReverseZoneForIP.
 func AutoReverseZone(ip string) string {
-	return autoReverseZone(ip)
+	zone, _ := dns.ReverseZoneForIP(ip)
+	return zone
 }
 
-// PTRName is the exported version for tests.
-func PTRName(ip, reverseZone string) string {
-	return ptrName(ip, reverseZone)
+// PTRName is exported for tests — delegates to dns.PTRNameForIP.
+func PTRName(ip, _ string) string {
+	return dns.PTRNameForIP(ip)
 }
 
 // SanitizeHostname is the exported version for tests.
@@ -461,7 +436,8 @@ func (sm *SyncManager) ReverseZone() string {
 	defer sm.mu.Unlock()
 	for ip := range sm.state {
 		if !strings.Contains(ip, ":") {
-			return autoReverseZone(ip)
+			zone, _ := dns.ReverseZoneForIP(ip)
+			return zone
 		}
 	}
 	return ""

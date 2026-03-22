@@ -12,14 +12,6 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// DDNSStore is the minimal interface for the DDNS handler.
-type DDNSStore interface {
-	GetZone(ctx context.Context, domain string) (*dns.Zone, error)
-	GetRecords(ctx context.Context, zoneDomain string) ([]dns.Record, error)
-	PutRecord(ctx context.Context, zoneDomain string, record *dns.Record) error
-	DeleteRecord(ctx context.Context, zoneDomain string, recordID int) error
-}
-
 // DDNSStats enthält laufende Statistiken des DDNS-Handlers.
 type DDNSStats struct {
 	TotalUpdates int64
@@ -37,7 +29,7 @@ type DDNSStats struct {
 // The DNS server must be configured with TsigSecret — the handler only implements
 // the status check and business logic.
 type DDNSHandler struct {
-	store        DDNSStore
+	store        DDNSStoreProvider
 	mu           sync.RWMutex
 	secrets      map[string]string // keyname → base64 secret
 	algorithms   map[string]string // keyname → algorithm URI
@@ -51,7 +43,7 @@ type DDNSHandler struct {
 
 // NewDDNSHandler creates a new DDNSHandler.
 // keyUpdater is set via SetDDNSHandler on the DNS server.
-func NewDDNSHandler(store DDNSStore, zoneReloader func()) *DDNSHandler {
+func NewDDNSHandler(store DDNSStoreProvider, zoneReloader func()) *DDNSHandler {
 	h := &DDNSHandler{
 		store:        store,
 		secrets:      map[string]string{},

@@ -12,12 +12,6 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// ZoneStore provides access to authoritative zones from backend.
-type ZoneStore interface {
-	ListZones(ctx context.Context) ([]*dns.Zone, error)
-	GetRecords(ctx context.Context, zoneDomain string) ([]dns.Record, error)
-}
-
 // ZoneManager manages authoritative zones in-memory.
 // Supports default zones (for all clients) and view-specific zones
 // (only for clients assigned to a specific split-horizon view).
@@ -40,7 +34,7 @@ func NewZoneManager() *ZoneManager {
 // Load loads authoritative zones from the store.
 // Records are already included in the zone objects returned by ListZones
 // (filestore loads records directly from JSON files).
-func (z *ZoneManager) Load(ctx context.Context, store ZoneStore) error {
+func (z *ZoneManager) Load(ctx context.Context, store ZoneProvider) error {
 	zones, err := store.ListZones(ctx)
 	if err != nil {
 		return err

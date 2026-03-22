@@ -60,6 +60,19 @@ func (z *Zone) EnsureSOA() {
 	}
 }
 
+// IncrementSerial increments the SOA serial number using the YYYYMMDDnn convention:
+// if the current serial is behind today's date prefix, it resets to today+01;
+// otherwise it increments by one.
+func (s *SOA) IncrementSerial() {
+	t := time.Now()
+	today := uint32(t.Year())*1000000 + uint32(t.Month())*10000 + uint32(t.Day())*100
+	if s.Serial < today {
+		s.Serial = today + 1
+	} else {
+		s.Serial++
+	}
+}
+
 // RecordByID returns the record with the given ID, or nil if not found.
 func (z *Zone) RecordByID(id int) *Record {
 	for i := range z.Records {

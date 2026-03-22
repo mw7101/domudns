@@ -120,6 +120,19 @@ export interface DnsRecord {
   tag?: string
 }
 
+export interface AutoPTRInfo {
+  created: boolean
+  zone_created: boolean
+  reverse_zone: string
+  ptr_record?: DnsRecord
+  error?: string
+}
+
+export interface CreateRecordResponse {
+  record: DnsRecord
+  ptr?: AutoPTRInfo
+}
+
 export interface BlocklistUrl {
   id: number
   url: string
@@ -261,11 +274,13 @@ export const zones = {
 // ─── Records ─────────────────────────────────────────────────────────────────
 
 export const records = {
-  create: (domain: string, payload: Omit<DnsRecord, 'id'>) =>
-    request<{ data: DnsRecord }>('/zones/' + encodeURIComponent(domain) + '/records', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    }),
+  create: (domain: string, payload: Omit<DnsRecord, 'id'>, autoPtr?: boolean) => {
+    const qs = autoPtr ? '?auto_ptr=true' : ''
+    return request<{ data: DnsRecord | CreateRecordResponse }>(
+      '/zones/' + encodeURIComponent(domain) + '/records' + qs,
+      { method: 'POST', body: JSON.stringify(payload) }
+    )
+  },
   update: (domain: string, id: number, payload: Partial<DnsRecord>) =>
     request<{ data: DnsRecord }>(
       '/zones/' + encodeURIComponent(domain) + '/records/' + id,

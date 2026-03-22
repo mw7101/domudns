@@ -76,7 +76,7 @@ func newServerWithOpts(cfg *config.Config, authManager *api.AuthManager, store a
 		configHandler.SetReloader(opts.ConfigReloader)
 	}
 	zones := api.NewZonesHandler(store, zoneReload)
-	records := api.NewRecordsHandler(store, zoneReload)
+	records := api.NewRecordsHandler(store, store, zoneReload)
 	acmeHandler := api.NewACMEHandler(store, acmeTTL)
 	blocklistHandler := api.NewBlocklistHandler(store, cfg, corednsReload)
 

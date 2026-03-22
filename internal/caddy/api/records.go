@@ -3,32 +3,42 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
 
 	"github.com/mw7101/domudns/internal/dns"
+	"github.com/mw7101/domudns/internal/store"
 	"github.com/rs/zerolog/log"
 )
 
-// RecordStore abstracts record persistence.
-type RecordStore interface {
-	GetZone(ctx context.Context, domain string) (*dns.Zone, error)
-	GetRecords(ctx context.Context, zoneDomain string) ([]dns.Record, error)
-	PutRecord(ctx context.Context, zoneDomain string, record *dns.Record) error
-	DeleteRecord(ctx context.Context, zoneDomain string, recordID int) error
+// AutoPTRInfo describes the result of an automatic PTR record creation.
+type AutoPTRInfo struct {
+	Created     bool        `json:"created"`
+	ZoneCreated bool        `json:"zone_created"`
+	ReverseZone string      `json:"reverse_zone"`
+	PTRRecord   *dns.Record `json:"ptr_record,omitempty"`
+	Error       string      `json:"error,omitempty"`
+}
+
+// CreateRecordResponse is returned by POST /api/zones/{domain}/records?auto_ptr=true.
+type CreateRecordResponse struct {
+	Record dns.Record   `json:"record"`
+	PTR    *AutoPTRInfo `json:"ptr,omitempty"`
 }
 
 // RecordsHandler handles record CRUD operations.
 type RecordsHandler struct {
-	store      RecordStore
+	store      store.RecordStore
+	zoneStore  store.ZoneStore
 	zoneReload ZoneReloader
 }
 
 // NewRecordsHandler creates a records handler.
 // zoneReload is optional - if provided, it will be called after mutating operations.
-func NewRecordsHandler(store RecordStore, zoneReload ZoneReloader) *RecordsHandler {
-	return &RecordsHandler{store: store, zoneReload: zoneReload}
+func NewRecordsHandler(store store.RecordStore, zoneStore store.ZoneStore, zoneReload ZoneReloader) *RecordsHandler {
+	return &RecordsHandler{store: store, zoneStore: zoneStore, zoneReload: zoneReload}
 }
 
 func (h *RecordsHandler) triggerZoneReload() {
@@ -167,8 +177,91 @@ func (h *RecordsHandler) create(ctx context.Context, w http.ResponseWriter, r *h
 		writeInternalError(w, "DB_ERROR", err)
 		return
 	}
+
+	autoPtr := r.URL.Query().Get("auto_ptr") == "true"
+	if autoPtr && (record.Type == dns.TypeA || record.Type == dns.TypeAAAA) {
+		// Build fully-qualified hostname for the PTR value
+		fqdn := record.Name
+		if fqdn == "@" {
+			fqdn = domainPart
+		} else {
+			fqdn = record.Name + "." + domainPart
+		}
+		ptrInfo := h.createAutoPTR(ctx, record.Value, fqdn, record.TTL)
+		h.triggerZoneReload()
+		status := http.StatusCreated
+		if !ptrInfo.Created {
+			status = http.StatusMultiStatus
+		}
+		writeSuccess(w, CreateRecordResponse{Record: record, PTR: ptrInfo}, status)
+		return
+	}
+
 	h.triggerZoneReload()
 	writeSuccess(w, record, http.StatusCreated)
+}
+
+// createAutoPTR creates a PTR record in the appropriate reverse zone.
+// It auto-creates the reverse zone if it does not yet exist.
+// Never returns nil.
+func (h *RecordsHandler) createAutoPTR(ctx context.Context, ip, fqdn string, ttl int) *AutoPTRInfo {
+	reverseZone, ok := dns.ReverseZoneForIP(ip)
+	if !ok {
+		return &AutoPTRInfo{Error: fmt.Sprintf("cannot determine reverse zone for IP %q", ip)}
+	}
+	ptrName := dns.PTRNameForIP(ip)
+
+	zoneCreated := false
+	_, err := h.zoneStore.GetZone(ctx, reverseZone)
+	if err != nil {
+		if err != dns.ErrZoneNotFound {
+			return &AutoPTRInfo{
+				ReverseZone: reverseZone,
+				Error:       fmt.Sprintf("get reverse zone: %v", err),
+			}
+		}
+		// Zone does not exist — create it with a default SOA
+		newZone := &dns.Zone{
+			Domain: reverseZone,
+			TTL:    ttl,
+			SOA:    dns.DefaultSOA(reverseZone),
+		}
+		if err := h.zoneStore.PutZone(ctx, newZone); err != nil {
+			return &AutoPTRInfo{
+				ReverseZone: reverseZone,
+				Error:       fmt.Sprintf("create reverse zone: %v", err),
+			}
+		}
+		zoneCreated = true
+		log.Info().Str("zone", reverseZone).Msg("auto-PTR: reverse zone created")
+	}
+
+	ptrRecord := &dns.Record{
+		Name:  ptrName,
+		Type:  dns.TypePTR,
+		TTL:   ttl,
+		Value: fqdn,
+	}
+	if err := h.store.PutRecord(ctx, reverseZone, ptrRecord); err != nil {
+		return &AutoPTRInfo{
+			ReverseZone: reverseZone,
+			ZoneCreated: zoneCreated,
+			Error:       fmt.Sprintf("create PTR record: %v", err),
+		}
+	}
+
+	log.Info().
+		Str("zone", reverseZone).
+		Str("name", ptrName).
+		Str("value", fqdn).
+		Msg("auto-PTR: PTR record created")
+
+	return &AutoPTRInfo{
+		Created:     true,
+		ZoneCreated: zoneCreated,
+		ReverseZone: reverseZone,
+		PTRRecord:   ptrRecord,
+	}
 }
 
 func (h *RecordsHandler) update(ctx context.Context, w http.ResponseWriter, r *http.Request, zoneDomain string, id int) {
