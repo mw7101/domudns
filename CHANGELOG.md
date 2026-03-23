@@ -2,7 +2,7 @@
 
 All notable changes to DomU DNS will be documented in this file.
 
-## [v.0.4.0]
+## [v0.4.0]
 
 ### Added
 
