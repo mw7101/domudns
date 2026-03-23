@@ -1,6 +1,7 @@
 package dns
 
 import (
+	"errors"
 	"testing"
 	"time"
 )
@@ -169,6 +170,24 @@ func TestValidateRecord(t *testing.T) {
 			zone:    "100.168.192.in-addr.arpa",
 			wantErr: true,
 		},
+		{
+			name:    "valid ALIAS at apex",
+			record:  Record{Name: "@", Type: TypeALIAS, TTL: 3600, Value: "cdn.example.com"},
+			zone:    "example.com",
+			wantErr: false,
+		},
+		{
+			name:    "valid ALIAS at subdomain",
+			record:  Record{Name: "www", Type: TypeALIAS, TTL: 3600, Value: "cdn.example.com"},
+			zone:    "example.com",
+			wantErr: false,
+		},
+		{
+			name:    "ALIAS with invalid FQDN",
+			record:  Record{Name: "@", Type: TypeALIAS, TTL: 3600, Value: "not a valid fqdn!!"},
+			zone:    "example.com",
+			wantErr: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -278,4 +297,22 @@ func TestSOA_IncrementSerial(t *testing.T) {
 			t.Errorf("want %d, got %d", before+1, soa.Serial)
 		}
 	})
+}
+
+func TestValidateZone_ALIASConflict(t *testing.T) {
+	zone := &Zone{
+		Domain: "example.com",
+		TTL:    3600,
+		Records: []Record{
+			{ID: 1, Name: "www", Type: TypeALIAS, TTL: 3600, Value: "cdn.example.com"},
+			{ID: 2, Name: "www", Type: TypeCNAME, TTL: 3600, Value: "other.example.com"},
+		},
+	}
+	err := ValidateZone(zone)
+	if err == nil {
+		t.Fatal("expected conflict error, got nil")
+	}
+	if !errors.Is(err, ErrALIASConflict) {
+		t.Errorf("want ErrALIASConflict, got: %v", err)
+	}
 }

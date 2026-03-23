@@ -3,18 +3,15 @@
 import { useEffect, useState, useCallback } from 'react'
 import { Topbar } from '@/components/layout/Topbar'
 import { KpiCard } from '@/components/shared/KpiCard'
-import { CardHoverEffect } from '@/components/ui/card-hover-effect'
 import {
   health, zones, blocklist, config, cluster, checkNodeHealth,
-  queryLog, metrics, dhcpLeaseSync,
+  queryLog, dhcpLeaseSync,
   type Zone, type BlocklistUrl, type Config, type ClusterNode,
-  type QueryLogStats, type MetricsSnapshot, type DHCPSyncStatus,
+  type QueryLogStats, type DHCPSyncStatus,
 } from '@/lib/api'
-import { fmtNum, fmtDate } from '@/lib/utils'
+import { fmtNum, fmtDate, cn } from '@/lib/utils'
 import {
   PieChart, Pie, Cell, Legend, Tooltip, ResponsiveContainer,
-  AreaChart, Area, XAxis, YAxis, CartesianGrid,
-  BarChart, Bar,
 } from 'recharts'
 import { useRouter } from 'next/navigation'
 import { InfoTooltip } from '@/components/shared/InfoTooltip'
@@ -46,7 +43,6 @@ export default function OverviewPage() {
   const [clusterRole, setClusterRole] = useState<string>('master')
   const [nodeStatuses, setNodeStatuses] = useState<Record<string, NodeStatus>>({})
   const [qlStats, setQlStats] = useState<QueryLogStats | null>(null)
-  const [metricHistory, setMetricHistory] = useState<MetricsSnapshot[]>([])
   const [dhcpStatus, setDhcpStatus] = useState<DHCPSyncStatus | null>(null)
   const [loading, setLoading] = useState(true)
   const [lastUpdated, setLastUpdated] = useState('')
@@ -54,7 +50,7 @@ export default function OverviewPage() {
 
   const fetchData = useCallback(async () => {
     try {
-      const [healthRes, zonesRes, blUrlsRes, blDomsRes, cfgRes, qlStatsRes, metricsRes, dhcpRes] =
+      const [healthRes, zonesRes, blUrlsRes, blDomsRes, cfgRes, qlStatsRes, dhcpRes] =
         await Promise.allSettled([
           health.get(),
           zones.list(),
@@ -62,7 +58,6 @@ export default function OverviewPage() {
           blocklist.listDomains(),
           config.get(),
           queryLog.stats(),
-          metrics.history('24h'),
           dhcpLeaseSync.getStatus(),
         ])
 
@@ -79,10 +74,6 @@ export default function OverviewPage() {
 
       if (qlStatsRes.status === 'fulfilled') {
         setQlStats(qlStatsRes.value?.data ?? null)
-      }
-
-      if (metricsRes.status === 'fulfilled') {
-        setMetricHistory(metricsRes.value?.data?.samples ?? [])
       }
 
       if (dhcpRes.status === 'fulfilled') {
@@ -176,21 +167,6 @@ export default function OverviewPage() {
   const blockRate = qlStats ? (qlStats.block_rate * 100).toFixed(1) : null
   const topClients = qlStats?.top_clients?.slice(0, 5) ?? []
   const topBlocked = qlStats?.top_blocked?.slice(0, 5) ?? []
-  const queriesPerHour = qlStats?.queries_per_hour ?? []
-
-  // Format metric history for chart (sample every nth point to keep it lean)
-  const historyChartData = metricHistory.map((s) => ({
-    ts: new Date(s.ts * 1000).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }),
-    Anfragen: s.queries,
-    Blockiert: s.blocked,
-    Gecacht: s.cached,
-  }))
-
-  // Queries per hour formatted
-  const qphChartData = queriesPerHour.map((q) => ({
-    hour: q.hour.length >= 13 ? q.hour.slice(11, 13) + ':00' : q.hour,
-    count: q.count,
-  }))
 
   // Max values for relative bars
   const maxClientCount = topClients[0]?.count ?? 1
@@ -214,58 +190,37 @@ export default function OverviewPage() {
                 : 'Dieser Server — Live-Statuscheck'}
             </p>
           </div>
-          <div className={`grid grid-cols-1 gap-3 ${remoteNodes.length > 0 ? 'sm:grid-cols-' + Math.min(remoteNodes.length + 1, 4) : ''}`}>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             {/* This server (self) */}
-            <CardHoverEffect className="p-4">
-              <div className="flex items-center gap-3">
-                <div
-                  className={`w-3 h-3 rounded-full shrink-0 ${
-                    healthStatus === 'ok' ? 'bg-green-400' : 'bg-red-400'
-                  }`}
-                />
-                <div>
-                  <div className="text-sm font-semibold text-[var(--text)]">
-                    Dieser Server
-                    <span className="ml-1.5 text-[10px] font-normal text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded-full">
-                      {clusterRole}
-                    </span>
-                  </div>
-                  <div className="text-xs text-[var(--muted)]">{typeof window !== 'undefined' ? window.location.hostname : '—'}</div>
-                  <div className={`text-xs mt-0.5 ${healthStatus === 'ok' ? 'text-green-400' : 'text-red-400'}`}>
-                    {healthStatus === 'ok' ? 'Online — OK' : 'API nicht erreichbar'}
-                  </div>
-                </div>
+            <div className={cn('rounded-2xl bg-[var(--surface-2)] neon-card p-5', healthStatus === 'ok' ? 'border border-green-500/30' : 'border border-red-500/30')}>
+              <div className={cn('text-xs font-semibold mb-2 flex items-center gap-1.5', healthStatus === 'ok' ? 'text-green-400' : 'text-red-400')}>
+                <span>Dieser Server</span>
+                <span className="text-[10px] font-normal text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded-full">{clusterRole}</span>
               </div>
-            </CardHoverEffect>
+              <div className="text-2xl font-bold text-[var(--text)] leading-none mb-2">
+                {healthStatus === 'ok' ? '✓' : '✗'}
+              </div>
+              <div className="text-xs text-[var(--muted)]">
+                {typeof window !== 'undefined' ? window.location.hostname : '—'} — {healthStatus === 'ok' ? 'Online' : 'Offline'}
+              </div>
+            </div>
             {/* Remote Nodes */}
             {remoteNodes.map((node) => {
               const st = nodeStatuses[node.url]
+              const online = st?.online
               return (
-                <CardHoverEffect key={node.url} className="p-4">
-                  <div className="flex items-center gap-3">
-                    <div
-                      className={`w-3 h-3 rounded-full shrink-0 ${
-                        !st
-                          ? 'bg-[var(--muted)] animate-pulse'
-                          : st.online
-                          ? 'bg-green-400'
-                          : 'bg-red-400'
-                      }`}
-                    />
-                    <div>
-                      <div className="text-sm font-semibold text-[var(--text)]">
-                        {node.label}
-                        <span className="ml-1.5 text-[10px] font-normal text-[var(--muted-2)] bg-[var(--muted)]/20 px-1.5 py-0.5 rounded-full">
-                          {node.role}
-                        </span>
-                      </div>
-                      <div className="text-xs text-[var(--muted)]">{node.ip}</div>
-                      <div className={`text-xs mt-0.5 ${!st ? 'text-[var(--muted-2)]' : st.online ? 'text-green-400' : 'text-red-400'}`}>
-                        {!st ? 'Prüfe …' : st.online ? 'Online — OK' : 'Nicht erreichbar'}
-                      </div>
-                    </div>
+                <div key={node.url} className={cn('rounded-2xl bg-[var(--surface-2)] neon-card p-5', !st ? '' : online ? 'border border-green-500/30' : 'border border-red-500/30')}>
+                  <div className={cn('text-xs font-semibold mb-2 flex items-center gap-1.5', !st ? 'text-[var(--muted-2)]' : online ? 'text-green-400' : 'text-red-400')}>
+                    <span>{node.label}</span>
+                    <span className="text-[10px] font-normal text-[var(--muted-2)] bg-[var(--muted)]/20 px-1.5 py-0.5 rounded-full">{node.role}</span>
                   </div>
-                </CardHoverEffect>
+                  <div className="text-2xl font-bold text-[var(--text)] leading-none mb-2">
+                    {!st ? '…' : online ? '✓' : '✗'}
+                  </div>
+                  <div className="text-xs text-[var(--muted)]">
+                    {node.ip} — {!st ? 'Prüfe …' : online ? 'Online' : 'Offline'}
+                  </div>
+                </div>
               )
             })}
           </div>
@@ -362,52 +317,6 @@ export default function OverviewPage() {
           </div>
         )}
 
-        {/* Query time history (AreaChart) */}
-        {historyChartData.length > 0 && (
-          <div className="bg-[var(--surface-2)] neon-card rounded-2xl p-4">
-            <div className="flex items-center gap-2 mb-4">
-              <span className="text-sm font-semibold text-[var(--muted-2)]">DNS-Anfragen (24h)</span>
-              <InfoTooltip text="Zeitverlauf der DNS-Anfragen, blockierten und gecachten Antworten der letzten 24 Stunden." />
-            </div>
-            <ResponsiveContainer width="100%" height={200}>
-              <AreaChart data={historyChartData} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="gradQueries" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#F59E0B" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="#F59E0B" stopOpacity={0} />
-                  </linearGradient>
-                  <linearGradient id="gradBlocked" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#ef4444" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="#ef4444" stopOpacity={0} />
-                  </linearGradient>
-                  <linearGradient id="gradCached" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#22c55e" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="#22c55e" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#2A2A34" />
-                <XAxis
-                  dataKey="ts"
-                  tick={{ fill: '#5A5A6E', fontSize: 11 }}
-                  tickLine={false}
-                  axisLine={false}
-                  interval="preserveStartEnd"
-                />
-                <YAxis
-                  tick={{ fill: '#5A5A6E', fontSize: 11 }}
-                  tickLine={false}
-                  axisLine={false}
-                />
-                <Tooltip contentStyle={CHART_TOOLTIP_STYLE} labelStyle={{ color: '#F4F4EF' }} />
-                <Legend wrapperStyle={{ fontSize: 12, color: '#9A9AAE' }} />
-                <Area type="monotone" dataKey="Anfragen" stroke="#F59E0B" fill="url(#gradQueries)" strokeWidth={2} dot={false} />
-                <Area type="monotone" dataKey="Blockiert" stroke="#ef4444" fill="url(#gradBlocked)" strokeWidth={1.5} dot={false} />
-                <Area type="monotone" dataKey="Gecacht" stroke="#22c55e" fill="url(#gradCached)" strokeWidth={1.5} dot={false} />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        )}
-
         {/* Top Clients + Top blocked domains */}
         {(topClients.length > 0 || topBlocked.length > 0) && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -466,34 +375,6 @@ export default function OverviewPage() {
                 </div>
               </div>
             )}
-          </div>
-        )}
-
-        {/* Queries per hour (BarChart) */}
-        {qphChartData.length > 0 && (
-          <div className="bg-[var(--surface-2)] neon-card rounded-2xl p-4">
-            <div className="flex items-center gap-2 mb-4">
-              <span className="text-sm font-semibold text-[var(--muted-2)]">Anfragen pro Stunde</span>
-              <InfoTooltip text="Anzahl der DNS-Anfragen je Stunde aus dem Query-Log." />
-            </div>
-            <ResponsiveContainer width="100%" height={160}>
-              <BarChart data={qphChartData} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#2A2A34" vertical={false} />
-                <XAxis
-                  dataKey="hour"
-                  tick={{ fill: '#5A5A6E', fontSize: 11 }}
-                  tickLine={false}
-                  axisLine={false}
-                />
-                <YAxis
-                  tick={{ fill: '#5A5A6E', fontSize: 11 }}
-                  tickLine={false}
-                  axisLine={false}
-                />
-                <Tooltip contentStyle={CHART_TOOLTIP_STYLE} labelStyle={{ color: '#F4F4EF' }} />
-                <Bar dataKey="count" fill="#F59E0B" name="Anfragen" radius={[3, 3, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
           </div>
         )}
 

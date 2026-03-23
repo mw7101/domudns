@@ -23,6 +23,7 @@ const (
 	TypeSPF   RecordType = "SPF"
 	TypeURI   RecordType = "URI"
 	TypeFWD   RecordType = "FWD"
+	TypeALIAS RecordType = "ALIAS"
 )
 
 // Record represents a DNS record.

@@ -34,6 +34,8 @@ var (
 	ErrInvalidFWD = errors.New("FWD requires at least one valid DNS server (IP or FQDN)")
 	// ErrInvalidPTR is returned for invalid PTR record values.
 	ErrInvalidPTR = errors.New("invalid PTR record")
+	// ErrALIASConflict is returned when ALIAS and CNAME exist at the same name.
+	ErrALIASConflict = errors.New("ALIAS and CNAME cannot coexist at the same name")
 )
 
 // IsValidDNSLabel returns true if s is a valid DNS label (@, or max 63 chars: a-z, A-Z, 0-9, hyphen).
@@ -180,6 +182,10 @@ func ValidateRecord(record Record, zoneDomain string) error {
 		if record.Value == "" || !isValidURI(record.Value) {
 			return ErrInvalidURI
 		}
+	case TypeALIAS:
+		if !isValidFQDN(record.Value) {
+			return fmt.Errorf("%w: invalid ALIAS target %q", ErrInvalidDomain, record.Value)
+		}
 	case TypeFWD:
 		if record.Name != "@" {
 			return fmt.Errorf("FWD record must be at zone apex (@)")
@@ -226,6 +232,27 @@ func ValidateZone(zone *Zone) error {
 	}
 	if zone.TTLOverride > 604800 {
 		return fmt.Errorf("ttl_override must not exceed 604800 seconds (7 days)")
+	}
+	// Check for ALIAS + CNAME conflict at the same name (R6).
+	type typePair struct{ hasAlias, hasCNAME bool }
+	namePairs := make(map[string]*typePair)
+	for _, r := range zone.Records {
+		p := namePairs[r.Name]
+		if p == nil {
+			p = &typePair{}
+			namePairs[r.Name] = p
+		}
+		if r.Type == TypeALIAS {
+			p.hasAlias = true
+		}
+		if r.Type == TypeCNAME {
+			p.hasCNAME = true
+		}
+	}
+	for name, p := range namePairs {
+		if p.hasAlias && p.hasCNAME {
+			return fmt.Errorf("record %s: %w", name, ErrALIASConflict)
+		}
 	}
 	for _, r := range zone.Records {
 		if err := ValidateRecord(r, zone.Domain); err != nil {

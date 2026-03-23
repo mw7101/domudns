@@ -10,7 +10,7 @@ import { zones as zonesApi, records as recordsApi, type Zone, type DnsRecord, ty
 import { formatRecordValue, RECORD_TYPE_COLORS } from '@/lib/utils'
 import { useZones } from '@/lib/hooks/useZones'
 
-const RECORD_TYPES = ['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS', 'SRV', 'PTR', 'CAA', 'FWD']
+const RECORD_TYPES = ['A', 'AAAA', 'ALIAS', 'CNAME', 'MX', 'TXT', 'NS', 'SRV', 'PTR', 'CAA', 'FWD']
 
 function nextSerial(current: number): number {
   const today = new Date()
@@ -23,6 +23,7 @@ function nextSerial(current: number): number {
 const TYPE_HINTS: Record<string, string> = {
   A: 'IPv4-Adresse',
   AAAA: 'IPv6-Adresse',
+  ALIAS: 'Ziel-Hostname (FQDN) — wird transparent zu A/AAAA aufgelöst, auch am Apex (@)',
   CNAME: 'Ziel-Hostname (FQDN)',
   MX: 'Mail-Server (FQDN)',
   TXT: 'Text-Inhalt',

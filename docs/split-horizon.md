@@ -10,6 +10,7 @@ Split-horizon DNS allows the same domain to return different responses to differ
 | NAS via internet | external | NXDOMAIN (not reachable) |
 | Internal API server | 10.0.0.0/8 (internal) | 10.0.5.20 |
 | External access to internal server | external | Different hostname / CNAME |
+| Apex alias to CDN (per view) | internal / external | ALIAS `@` → different CDN per view |
 
 ## Concept
 
@@ -85,6 +86,26 @@ curl -X POST "http://localhost/api/zones/nas.home/records" \
   -H "Content-Type: application/json" \
   -d '{"name": "@", "type": "A", "ttl": 300, "value": "203.0.113.10"}'
 ```
+
+### ALIAS at apex in view zones
+
+ALIAS records work at the zone apex — useful when different views should resolve `@` to different targets:
+
+```bash
+# Internal view: apex → internal CDN/server
+curl -X POST "http://localhost/api/zones/example.com/records?view=internal" \
+  -H "Authorization: Bearer KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "@", "type": "ALIAS", "ttl": 300, "value": "internal-lb.example.com"}'
+
+# Default (external) view: apex → public CDN
+curl -X POST "http://localhost/api/zones/example.com/records" \
+  -H "Authorization: Bearer KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "@", "type": "ALIAS", "ttl": 300, "value": "cdn.cloudflare.com"}'
+```
+
+ALIAS resolution uses the same upstream forwarder as the view's DNS context.
 
 ### Read and delete a view zone
 

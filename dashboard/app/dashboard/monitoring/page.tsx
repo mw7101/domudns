@@ -164,13 +164,6 @@ export default function MonitoringPage() {
         ]
       : []
 
-  const allMetrics = Object.entries(parsed).filter(
-    ([k]) => !k.startsWith('go_') && !k.startsWith('process_')
-  )
-  const goMetrics = Object.entries(parsed)
-    .filter(([k]) => k.startsWith('go_') || k.startsWith('process_'))
-    .slice(0, 12)
-
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -307,52 +300,6 @@ export default function MonitoringPage() {
           </div>
         </div>
 
-        {/* DNS Metrics Detail */}
-        {allMetrics.length > 0 && (
-          <div className="bg-[var(--surface-2)] neon-card rounded-2xl p-4">
-            <div className="flex items-center gap-2 mb-4">
-              <span className="text-sm font-semibold text-[var(--muted-2)]">DNS Metriken Detail</span>
-              <InfoTooltip text="Alle benutzerdefinierten Prometheus-Metriken des DNS-Stacks." />
-            </div>
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-              {allMetrics.map(([name, m]) => (
-                <div key={name} className="bg-[var(--surface)]/60 border border-[var(--border)]/50 rounded-xl p-3">
-                  <div className="text-xs text-[var(--muted)] mb-1 truncate">{name}</div>
-                  <div className="text-sm font-bold text-[var(--text)]">{fmtNum(m.total)}</div>
-                  {m.samples.length > 1 && (
-                    <div className="text-xs text-[var(--muted)] mt-0.5">{m.samples.length} Label-Varianten</div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Go Runtime */}
-        {goMetrics.length > 0 && (
-          <div className="bg-[var(--surface-2)] neon-card rounded-2xl p-4">
-            <div className="flex items-center gap-2 mb-4">
-              <span className="text-sm font-semibold text-[var(--muted-2)]">Go Runtime</span>
-              <InfoTooltip text="Interne Go-Runtime-Metriken: Goroutines, GC, Speicherstatistiken." />
-            </div>
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-              {goMetrics.map(([name, m]) => (
-                <div key={name} className="bg-[var(--surface)]/60 border border-[var(--border)]/50 rounded-xl p-3">
-                  <div className="text-xs text-[var(--muted)] mb-1 truncate">
-                    {name.replace(/^(go_|process_)/, '')}
-                  </div>
-                  <div className="text-sm font-bold text-[var(--text)]">
-                    {name.includes('bytes')
-                      ? `${(m.total / 1024 / 1024).toFixed(2)} MB`
-                      : name.includes('seconds')
-                      ? `${m.total.toFixed(3)}s`
-                      : fmtNum(m.total)}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
       </div>
     </>
   )

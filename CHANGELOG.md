@@ -2,6 +2,12 @@
 
 All notable changes to DomU DNS will be documented in this file.
 
+## [v.0.4.0]
+
+### Added
+
+- `ALIAS` record type: transparent CNAME-like resolution at apex and subdomains. Resolves target in-zone first, then via upstream forwarder. Returns synthesized A/AAAA records with target TTL. ALIAS record never exposed to clients.
+
 ## [v0.3.0]
 
 ### Breaking Changes
