@@ -18,7 +18,7 @@ func main() {
 	flag.Parse()
 
 	if *version {
-		fmt.Printf("dns-stack-cli %s (built %s)\n", Version, BuildTime)
+		fmt.Printf("domudns-cli %s (built %s)\n", Version, BuildTime)
 		os.Exit(0)
 	}
 
@@ -37,7 +37,7 @@ func main() {
 		os.Exit(0)
 	}
 
-	fmt.Println("dns-stack-cli - Management CLI for domudns")
-	fmt.Println("Usage: dns-stack-cli [flags]")
+	fmt.Println("domudns-cli - Management CLI for DomU DNS")
+	fmt.Println("Usage: domudns-cli [flags]")
 	flag.PrintDefaults()
 }
