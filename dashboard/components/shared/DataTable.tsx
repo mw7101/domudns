@@ -27,7 +27,7 @@ export function DataTable<T>({
 }: DataTableProps<T>) {
   if (!data.length) {
     return (
-      <div className="flex items-center justify-center py-12 text-[#6b5f8a] text-sm">
+      <div className="flex items-center justify-center py-12 text-[var(--muted)] text-sm">
         {emptyMessage}
       </div>
     )
@@ -37,12 +37,12 @@ export function DataTable<T>({
     <div className={cn('overflow-x-auto', className)}>
       <table className="w-full text-sm">
         <thead>
-          <tr className="border-b border-[#2a1f42]">
+          <tr className="border-b border-[var(--border)]">
             {columns.map((col) => (
               <th
                 key={col.key}
                 className={cn(
-                  'px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[#9a8cbf]',
+                  'px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[var(--muted-2)]',
                   col.className
                 )}
               >
@@ -51,16 +51,16 @@ export function DataTable<T>({
             ))}
           </tr>
         </thead>
-        <tbody className="divide-y divide-[#100c1e]">
+        <tbody className="divide-y divide-[var(--surface-3)]">
           {data.map((row) => (
             <tr
               key={keyFn(row)}
-              className="hover:bg-[#100c1e]/50 transition-colors"
+              className="hover:bg-[var(--surface-2)]/50 transition-colors"
             >
               {columns.map((col) => (
                 <td
                   key={col.key}
-                  className={cn('px-4 py-3 text-[#f0eeff]', col.className)}
+                  className={cn('px-4 py-3 text-[var(--text)]', col.className)}
                 >
                   {col.render(row)}
                 </td>

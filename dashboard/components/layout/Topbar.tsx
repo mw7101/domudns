@@ -13,7 +13,7 @@ export function Topbar({ title, isRefreshing, lastUpdated, actions }: TopbarProp
   const { toggle } = useMenu()
 
   return (
-    <header className="sticky top-0 z-30 flex items-center gap-4 px-4 lg:px-6 py-3 bg-[#080612]/90 backdrop-blur-sm border-b border-[#2a1f42]">
+    <header className="sticky top-0 z-30 flex items-center gap-4 px-4 lg:px-6 py-3 bg-[var(--surface)]/90 backdrop-blur-sm border-b border-[var(--border)]">
       {/* Hamburger (mobile) */}
       <button
         onClick={toggle}
@@ -35,7 +35,7 @@ export function Topbar({ title, isRefreshing, lastUpdated, actions }: TopbarProp
         )}
         {isRefreshing && (
           <span
-            className="w-2 h-2 rounded-full bg-violet-400 animate-pulse"
+            className="w-2 h-2 rounded-full bg-amber-400 animate-pulse"
             title="Automatische Aktualisierung aktiv"
           />
         )}

@@ -10,16 +10,17 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        surface: '#0f172a',
-        'surface-2': '#1e293b',
-        'surface-3': '#252530',
-        border: '#334155',
-        muted: '#64748b',
-        'muted-2': '#94a3b8',
-        text: '#f1f5f9',
-        'text-2': '#e2e8f0',
-        primary: '#0ea5e9',
-        accent: '#6366f1',
+        surface:    '#0A0A0C',
+        'surface-2':'#111116',
+        'surface-3':'#1C1C23',
+        border:     '#2A2A34',
+        muted:      '#5A5A6E',
+        'muted-2':  '#9A9AAE',
+        text:       '#F4F4EF',
+        'text-2':   '#CCCCC0',
+        primary:    '#F59E0B',
+        accent:     '#D97706',
+        neon:       '#FCD34D',
       },
       animation: {
         'move-border': 'move-border 4s linear infinite',

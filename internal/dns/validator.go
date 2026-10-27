@@ -51,7 +51,7 @@ func IsValidDNSLabel(s string) bool {
 		return false
 	}
 	for _, c := range s {
-		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '*') {
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '*') {
 			return false
 		}
 	}
@@ -240,7 +240,32 @@ func isValidFQDN(s string) bool {
 	if s == "" {
 		return false
 	}
-	return IsValidDomain(s)
+	return isValidHostname(s)
+}
+
+// isValidHostname validates a DNS hostname that may appear as a record target
+// (PTR, MX, NS, SRV values). Unlike IsValidDomain, underscores are allowed
+// because DHCP-registered hostnames (e.g. ESP_CC8108) and service labels
+// (e.g. _sip._tcp) legitimately contain underscores.
+func isValidHostname(s string) bool {
+	if len(s) == 0 || len(s) > 253 {
+		return false
+	}
+	labels := strings.Split(s, ".")
+	for _, label := range labels {
+		if len(label) == 0 || len(label) > 63 {
+			return false
+		}
+		if label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		for _, c := range label {
+			if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '*') {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // IsValidDomain returns true if s is a valid DNS domain name (e.g. example.com).

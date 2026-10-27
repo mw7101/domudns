@@ -21,11 +21,11 @@ export function MovingBorderButton({
       {...props}
       className={cn(
         'relative inline-flex items-center justify-center px-4 py-2 rounded-xl text-sm font-semibold',
-        'bg-gradient-to-r from-violet-500 to-purple-600 text-white',
-        'hover:from-violet-400 hover:to-purple-500 transition-all duration-200',
-        'focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 focus:ring-offset-[#080612]',
+        'bg-gradient-to-r from-amber-600 to-amber-500 text-white',
+        'hover:from-amber-500 hover:to-amber-400 transition-all duration-200',
+        'focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2 focus:ring-offset-[var(--surface)]',
         'disabled:opacity-50 disabled:cursor-not-allowed',
-        'shadow-lg shadow-violet-500/30',
+        'shadow-lg shadow-amber-500/20',
         className
       )}
     >

@@ -6,10 +6,18 @@ import { Topbar } from '@/components/layout/Topbar'
 import { AnimatedModal } from '@/components/ui/animated-modal'
 import { MovingBorderButton } from '@/components/ui/moving-border'
 import { useToast } from '@/components/shared/Toast'
-import { zones as zonesApi, records as recordsApi, type Zone, type DnsRecord, type ImportResult } from '@/lib/api'
+import { zones as zonesApi, records as recordsApi, type Zone, type DnsRecord, type ImportResult, type SOA } from '@/lib/api'
 import { formatRecordValue, RECORD_TYPE_COLORS } from '@/lib/utils'
 
 const RECORD_TYPES = ['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS', 'SRV', 'PTR', 'CAA', 'FWD']
+
+function nextSerial(current: number): number {
+  const today = new Date()
+  const base = parseInt(
+    `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}00`
+  )
+  return Math.max(current + 1, base)
+}
 
 const TYPE_HINTS: Record<string, string> = {
   A: 'IPv4-Adresse',
@@ -41,6 +49,7 @@ function ZonesContent() {
   const [deletingRecord, setDeletingRecord] = useState<number | null>(null)
   const [exportingZone, setExportingZone] = useState(false)
   const [importing, setImporting] = useState(false)
+  const [savingSOA, setSavingSOA] = useState(false)
 
   // Import Modal
   const [importOpen, setImportOpen] = useState(false)
@@ -58,6 +67,18 @@ function ZonesContent() {
   const [zoneView, setZoneView] = useState('')
   const [zoneTtl, setZoneTtl] = useState(3600)
   const [zoneTtlOverride, setZoneTtlOverride] = useState(0)
+
+  // SOA Modal
+  const [soaModalOpen, setSOAModalOpen] = useState(false)
+  const [soaForm, setSOAForm] = useState<SOA>({
+    mname: '',
+    rname: '',
+    serial: 0,
+    refresh: 3600,
+    retry: 1800,
+    expire: 604800,
+    minimum: 300,
+  })
 
   // Record Modal
   const [recordModalOpen, setRecordModalOpen] = useState(false)
@@ -86,9 +107,11 @@ function ZonesContent() {
   }, [showToast])
 
   const loadZoneDetail = useCallback(
-    async (domain: string) => {
+    async (domain: string, view?: string) => {
       try {
-        const res = await zonesApi.get(domain)
+        const res = view
+          ? await zonesApi.getView(domain, view)
+          : await zonesApi.get(domain)
         setSelectedZone(res.data)
       } catch {
         showToast('Zone nicht gefunden', 'error')
@@ -200,7 +223,7 @@ function ZonesContent() {
         showToast('Record hinzugefügt')
       }
       setRecordModalOpen(false)
-      await loadZoneDetail(recordDomain)
+      await loadZoneDetail(recordDomain, selectedZone?.view)
     } catch (err: unknown) {
       showToast(err instanceof Error ? err.message : 'Fehler', 'error')
     } finally {
@@ -215,11 +238,36 @@ function ZonesContent() {
     try {
       await recordsApi.delete(domain, id)
       showToast('Record gelöscht')
-      await loadZoneDetail(domain)
+      await loadZoneDetail(domain, selectedZone?.view)
     } catch (err: unknown) {
       showToast(err instanceof Error ? err.message : 'Fehler', 'error')
     } finally {
       setDeletingRecord(null)
+    }
+  }
+
+  const openSOAModal = () => {
+    if (!selectedZone?.soa) return
+    setSOAForm({ ...selectedZone.soa })
+    setSOAModalOpen(true)
+  }
+
+  const handleSaveSOA = async () => {
+    if (savingSOA || !selectedZone) return
+    setSavingSOA(true)
+    try {
+      const serial = nextSerial(selectedZone.soa?.serial ?? 0)
+      await zonesApi.update(selectedZone.domain, {
+        ...selectedZone,
+        soa: { ...soaForm, serial },
+      }, selectedZone.view)
+      showToast('SOA gespeichert')
+      setSOAModalOpen(false)
+      await loadZoneDetail(selectedZone.domain, selectedZone.view)
+    } catch (err: unknown) {
+      showToast(err instanceof Error ? err.message : 'Fehler beim Speichern', 'error')
+    } finally {
+      setSavingSOA(false)
     }
   }
 
@@ -294,7 +342,7 @@ function ZonesContent() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="w-6 h-6 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" />
+        <div className="w-6 h-6 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
       </div>
     )
   }
@@ -312,15 +360,15 @@ function ZonesContent() {
         <div className="p-4 lg:p-6 space-y-5">
           <button
             onClick={() => router.push('/dashboard/zones/')}
-            className="text-sm text-violet-400 hover:text-violet-300 flex items-center gap-1"
+            className="text-sm text-amber-400 hover:text-amber-400 flex items-center gap-1"
           >
             ← Zurück zu Zonen
           </button>
 
           <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-base font-semibold text-[#f0eeff]">{selectedZone.domain}</h2>
-              <p className="text-xs text-[#6b5f8a]">
+              <h2 className="text-base font-semibold text-[var(--text)]">{selectedZone.domain}</h2>
+              <p className="text-xs text-[var(--muted)]">
                 {(selectedZone.records ?? []).length} Records · TTL {selectedZone.ttl ?? 3600}s
                 {selectedZone.ttl_override ? ` · Override ${selectedZone.ttl_override}s` : ''} ·{' '}
                 {Object.entries(typeStats)
@@ -332,7 +380,7 @@ function ZonesContent() {
               <button
                 onClick={() => handleExportZone(selectedZone.domain, selectedZone.view)}
                 disabled={exportingZone}
-                className="text-xs text-[#9a8cbf] hover:text-[#f0eeff] disabled:opacity-50 px-3 py-1.5 rounded-lg border border-[#2a1f42] hover:border-[#6b5f8a] transition-colors"
+                className="text-xs text-[var(--muted-2)] hover:text-[var(--text)] disabled:opacity-50 px-3 py-1.5 rounded-lg border border-[var(--border)] hover:border-[var(--muted)] transition-colors"
               >
                 {exportingZone ? '…' : '↓ Export .zone'}
               </button>
@@ -342,38 +390,61 @@ function ZonesContent() {
             </div>
           </div>
 
-          <div className="bg-[#100c1e] neon-card rounded-2xl overflow-hidden">
-            {(selectedZone.records ?? []).length > 0 ? (
+          <div className="bg-[var(--surface-2)] neon-card rounded-2xl overflow-hidden">
+            {(selectedZone.records ?? []).length > 0 || selectedZone.soa ? (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="border-b border-[#2a1f42]">
+                    <tr className="border-b border-[var(--border)]">
                       {['Name', 'Typ', 'TTL', 'Wert', 'Aktionen'].map((h) => (
-                        <th key={h} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[#9a8cbf]">
+                        <th key={h} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[var(--muted-2)]">
                           {h}
                         </th>
                       ))}
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-[#080612]">
+                  <tbody className="divide-y divide-[var(--surface)]">
+                    {selectedZone.soa && (
+                      <tr className="bg-amber-500/5 hover:bg-amber-500/10 transition-colors">
+                        <td className="px-4 py-3 font-mono text-xs text-[var(--text)]">@</td>
+                        <td className="px-4 py-3">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-amber-500/20 text-amber-400">
+                            SOA
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-xs text-[var(--muted)]">{selectedZone.soa.minimum}s</td>
+                        <td className="px-4 py-3 font-mono text-xs text-[var(--muted)] max-w-xs truncate">
+                          {selectedZone.soa.mname} {selectedZone.soa.rname}{' '}
+                          <span className="text-[var(--muted-2)]">(Serial: {selectedZone.soa.serial})</span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <button
+                            onClick={openSOAModal}
+                            className="text-xs text-[var(--muted-2)] hover:text-[var(--text)] px-2 py-1 rounded border border-[var(--border)] hover:border-[var(--muted)] transition-colors"
+                          >
+                            Bearbeiten
+                          </button>
+                        </td>
+                      </tr>
+                    )}
                     {(selectedZone.records ?? []).map((r) => {
                       const isDeletingThis = deletingRecord === r.id
                       return (
-                      <tr key={r.id} className="hover:bg-[#1a1230] transition-colors">
-                        <td className="px-4 py-3 font-mono text-xs text-[#f0eeff]">{r.name ?? '@'}</td>
+                      <tr key={r.id} className="hover:bg-[var(--surface-3)] transition-colors">
+                        <td className="px-4 py-3 font-mono text-xs text-[var(--text)]">{r.name ?? '@'}</td>
                         <td className="px-4 py-3">
                           <span
                             className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold"
                             style={{
                               background: (RECORD_TYPE_COLORS[r.type] ?? '#5a5a72') + '25',
-                              color: RECORD_TYPE_COLORS[r.type] ?? '#9a8cbf',
+                              color: RECORD_TYPE_COLORS[r.type] ?? '#9A9AAE',
                             }}
                           >
                             {r.type}
                           </span>
                         </td>
-                        <td className="px-4 py-3 text-xs text-[#6b5f8a]">{r.ttl}s</td>
-                        <td className="px-4 py-3 font-mono text-xs text-[#f0eeff] max-w-xs truncate">
+                        <td className="px-4 py-3 text-xs text-[var(--muted)]">{r.ttl}s</td>
+                        <td className="px-4 py-3 font-mono text-xs text-[var(--text)] max-w-xs truncate">
                           {formatRecordValue(r)}
                         </td>
                         <td className="px-4 py-3">
@@ -381,7 +452,7 @@ function ZonesContent() {
                             <button
                               onClick={() => openRecordModal(selectedZone.domain, r)}
                               disabled={isDeletingThis}
-                              className="text-xs text-[#9a8cbf] hover:text-[#f0eeff] disabled:opacity-50 px-2 py-1 rounded border border-[#2a1f42] hover:border-[#6b5f8a] transition-colors"
+                              className="text-xs text-[var(--muted-2)] hover:text-[var(--text)] disabled:opacity-50 px-2 py-1 rounded border border-[var(--border)] hover:border-[var(--muted)] transition-colors"
                             >
                               Bearbeiten
                             </button>
@@ -405,8 +476,8 @@ function ZonesContent() {
             ) : (
               <div className="flex flex-col items-center justify-center py-12 gap-3">
                 <div className="text-2xl">📋</div>
-                <div className="text-sm font-medium text-[#f0eeff]">Keine Records</div>
-                <div className="text-xs text-[#6b5f8a]">Füge den ersten DNS-Record hinzu.</div>
+                <div className="text-sm font-medium text-[var(--text)]">Keine Records</div>
+                <div className="text-xs text-[var(--muted)]">Füge den ersten DNS-Record hinzu.</div>
                 <MovingBorderButton onClick={() => openRecordModal(selectedZone.domain)} className="mt-1">
                   + Record hinzufügen
                 </MovingBorderButton>
@@ -423,7 +494,7 @@ function ZonesContent() {
         >
           <div className="space-y-4">
             <div>
-              <label className="block text-xs font-semibold text-[#9a8cbf] uppercase tracking-wider mb-2">
+              <label className="block text-xs font-semibold text-[var(--muted-2)] uppercase tracking-wider mb-2">
                 Name (@ = Zone-Apex)
               </label>
               <input
@@ -431,18 +502,18 @@ function ZonesContent() {
                 onChange={(e) => setRForm((f) => ({ ...f, name: e.target.value }))}
                 placeholder="@ oder www"
                 readOnly={rForm.type === 'FWD'}
-                className="w-full px-3 py-2 rounded-xl bg-[#080612] border border-[#2a1f42] text-[#f0eeff] text-sm focus:outline-none focus:border-violet-500 transition-colors read-only:opacity-60 read-only:cursor-not-allowed"
+                className="w-full px-3 py-2 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] text-sm focus:outline-none focus:border-amber-500 transition-colors read-only:opacity-60 read-only:cursor-not-allowed"
               />
-              <p className="text-xs text-[#6b5f8a] mt-1">@ = Zone selbst, sonst Subdomain</p>
+              <p className="text-xs text-[var(--muted)] mt-1">@ = Zone selbst, sonst Subdomain</p>
             </div>
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-semibold text-[#9a8cbf] uppercase tracking-wider mb-2">Typ</label>
+                <label className="block text-xs font-semibold text-[var(--muted-2)] uppercase tracking-wider mb-2">Typ</label>
                 <select
                   value={rForm.type}
                   onChange={(e) => setRForm((f) => ({ ...f, type: e.target.value }))}
-                  className="w-full px-3 py-2 rounded-xl bg-[#080612] border border-[#2a1f42] text-[#f0eeff] text-sm focus:outline-none focus:border-violet-500 transition-colors"
+                  className="w-full px-3 py-2 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] text-sm focus:outline-none focus:border-amber-500 transition-colors"
                 >
                   {RECORD_TYPES.map((t) => (
                     <option key={t} value={t}>{t}</option>
@@ -450,39 +521,39 @@ function ZonesContent() {
                 </select>
               </div>
               <div>
-                <label className="block text-xs font-semibold text-[#9a8cbf] uppercase tracking-wider mb-2">TTL (s)</label>
+                <label className="block text-xs font-semibold text-[var(--muted-2)] uppercase tracking-wider mb-2">TTL (s)</label>
                 <input
                   type="number"
                   value={rForm.ttl}
                   onChange={(e) => setRForm((f) => ({ ...f, ttl: parseInt(e.target.value) || 3600 }))}
                   min={60}
-                  className="w-full px-3 py-2 rounded-xl bg-[#080612] border border-[#2a1f42] text-[#f0eeff] text-sm focus:outline-none focus:border-violet-500 transition-colors"
+                  className="w-full px-3 py-2 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] text-sm focus:outline-none focus:border-amber-500 transition-colors"
                 />
               </div>
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-[#9a8cbf] uppercase tracking-wider mb-2">
+              <label className="block text-xs font-semibold text-[var(--muted-2)] uppercase tracking-wider mb-2">
                 Wert
               </label>
               <input
                 value={rForm.value}
                 onChange={(e) => setRForm((f) => ({ ...f, value: e.target.value }))}
                 placeholder={TYPE_HINTS[rForm.type] ?? 'Wert'}
-                className="w-full px-3 py-2 rounded-xl bg-[#080612] border border-[#2a1f42] text-[#f0eeff] text-sm focus:outline-none focus:border-violet-500 transition-colors"
+                className="w-full px-3 py-2 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] text-sm focus:outline-none focus:border-amber-500 transition-colors"
               />
-              <p className="text-xs text-[#6b5f8a] mt-1">{TYPE_HINTS[rForm.type] ?? ''}</p>
+              <p className="text-xs text-[var(--muted)] mt-1">{TYPE_HINTS[rForm.type] ?? ''}</p>
             </div>
 
             {rForm.type === 'MX' && (
               <div>
-                <label className="block text-xs font-semibold text-[#9a8cbf] uppercase tracking-wider mb-2">Priorität</label>
+                <label className="block text-xs font-semibold text-[var(--muted-2)] uppercase tracking-wider mb-2">Priorität</label>
                 <input
                   type="number"
                   value={rForm.priority}
                   onChange={(e) => setRForm((f) => ({ ...f, priority: parseInt(e.target.value) || 10 }))}
                   min={0} max={65535}
-                  className="w-full px-3 py-2 rounded-xl bg-[#080612] border border-[#2a1f42] text-[#f0eeff] text-sm focus:outline-none focus:border-violet-500 transition-colors"
+                  className="w-full px-3 py-2 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] text-sm focus:outline-none focus:border-amber-500 transition-colors"
                 />
               </div>
             )}
@@ -490,24 +561,24 @@ function ZonesContent() {
             {rForm.type === 'SRV' && (
               <div className="grid grid-cols-3 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold text-[#9a8cbf] uppercase tracking-wider mb-2">Prio</label>
-                  <input type="number" value={rForm.priority} onChange={(e) => setRForm((f) => ({ ...f, priority: parseInt(e.target.value) || 0 }))} className="w-full px-3 py-2 rounded-xl bg-[#080612] border border-[#2a1f42] text-[#f0eeff] text-sm focus:outline-none focus:border-violet-500 transition-colors" />
+                  <label className="block text-xs font-semibold text-[var(--muted-2)] uppercase tracking-wider mb-2">Prio</label>
+                  <input type="number" value={rForm.priority} onChange={(e) => setRForm((f) => ({ ...f, priority: parseInt(e.target.value) || 0 }))} className="w-full px-3 py-2 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] text-sm focus:outline-none focus:border-amber-500 transition-colors" />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-[#9a8cbf] uppercase tracking-wider mb-2">Gewicht</label>
-                  <input type="number" value={rForm.weight} onChange={(e) => setRForm((f) => ({ ...f, weight: parseInt(e.target.value) || 10 }))} className="w-full px-3 py-2 rounded-xl bg-[#080612] border border-[#2a1f42] text-[#f0eeff] text-sm focus:outline-none focus:border-violet-500 transition-colors" />
+                  <label className="block text-xs font-semibold text-[var(--muted-2)] uppercase tracking-wider mb-2">Gewicht</label>
+                  <input type="number" value={rForm.weight} onChange={(e) => setRForm((f) => ({ ...f, weight: parseInt(e.target.value) || 10 }))} className="w-full px-3 py-2 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] text-sm focus:outline-none focus:border-amber-500 transition-colors" />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-[#9a8cbf] uppercase tracking-wider mb-2">Port</label>
-                  <input type="number" value={rForm.port} onChange={(e) => setRForm((f) => ({ ...f, port: parseInt(e.target.value) || 443 }))} className="w-full px-3 py-2 rounded-xl bg-[#080612] border border-[#2a1f42] text-[#f0eeff] text-sm focus:outline-none focus:border-violet-500 transition-colors" />
+                  <label className="block text-xs font-semibold text-[var(--muted-2)] uppercase tracking-wider mb-2">Port</label>
+                  <input type="number" value={rForm.port} onChange={(e) => setRForm((f) => ({ ...f, port: parseInt(e.target.value) || 443 }))} className="w-full px-3 py-2 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] text-sm focus:outline-none focus:border-amber-500 transition-colors" />
                 </div>
               </div>
             )}
 
             {rForm.type === 'CAA' && (
               <div>
-                <label className="block text-xs font-semibold text-[#9a8cbf] uppercase tracking-wider mb-2">Tag</label>
-                <select value={rForm.tag} onChange={(e) => setRForm((f) => ({ ...f, tag: e.target.value }))} className="w-full px-3 py-2 rounded-xl bg-[#080612] border border-[#2a1f42] text-[#f0eeff] text-sm focus:outline-none focus:border-violet-500 transition-colors">
+                <label className="block text-xs font-semibold text-[var(--muted-2)] uppercase tracking-wider mb-2">Tag</label>
+                <select value={rForm.tag} onChange={(e) => setRForm((f) => ({ ...f, tag: e.target.value }))} className="w-full px-3 py-2 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] text-sm focus:outline-none focus:border-amber-500 transition-colors">
                   <option value="issue">issue</option>
                   <option value="issuewild">issuewild</option>
                   <option value="iodef">iodef</option>
@@ -519,7 +590,7 @@ function ZonesContent() {
               <button
                 onClick={() => setRecordModalOpen(false)}
                 disabled={savingRecord}
-                className="flex-1 px-4 py-2 rounded-xl border border-[#2a1f42] text-[#9a8cbf] text-sm hover:text-[#f0eeff] hover:border-[#6b5f8a] disabled:opacity-50 transition-colors"
+                className="flex-1 px-4 py-2 rounded-xl border border-[var(--border)] text-[var(--muted-2)] text-sm hover:text-[var(--text)] hover:border-[var(--muted)] disabled:opacity-50 transition-colors"
               >
                 Abbrechen
               </button>
@@ -527,6 +598,116 @@ function ZonesContent() {
                 {savingRecord
                   ? <span className="flex items-center justify-center gap-2"><span className="inline-block w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" /> Speichert …</span>
                   : editingRecord ? 'Speichern' : 'Hinzufügen'}
+              </MovingBorderButton>
+            </div>
+          </div>
+        </AnimatedModal>
+
+        {/* SOA Modal */}
+        <AnimatedModal
+          isOpen={soaModalOpen}
+          onClose={() => setSOAModalOpen(false)}
+          title={`SOA bearbeiten — ${selectedZone?.domain ?? ''}`}
+        >
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="col-span-2">
+                <label className="block text-xs font-semibold text-[var(--muted-2)] uppercase tracking-wider mb-2">
+                  Primary Nameserver (MName)
+                </label>
+                <input
+                  value={soaForm.mname}
+                  onChange={(e) => setSOAForm((f) => ({ ...f, mname: e.target.value }))}
+                  placeholder="ns1.example.com"
+                  className="w-full px-3 py-2 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] text-sm focus:outline-none focus:border-amber-500 transition-colors"
+                />
+              </div>
+              <div className="col-span-2">
+                <label className="block text-xs font-semibold text-[var(--muted-2)] uppercase tracking-wider mb-2">
+                  Responsible Mailbox (RName)
+                </label>
+                <input
+                  value={soaForm.rname}
+                  onChange={(e) => setSOAForm((f) => ({ ...f, rname: e.target.value }))}
+                  placeholder="hostmaster.example.com"
+                  className="w-full px-3 py-2 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] text-sm focus:outline-none focus:border-amber-500 transition-colors"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-[var(--muted-2)] uppercase tracking-wider mb-2">
+                  Refresh (s)
+                </label>
+                <input
+                  type="number"
+                  value={soaForm.refresh}
+                  onChange={(e) => setSOAForm((f) => ({ ...f, refresh: parseInt(e.target.value) || 3600 }))}
+                  min={60}
+                  className="w-full px-3 py-2 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] text-sm focus:outline-none focus:border-amber-500 transition-colors"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-[var(--muted-2)] uppercase tracking-wider mb-2">
+                  Retry (s)
+                </label>
+                <input
+                  type="number"
+                  value={soaForm.retry}
+                  onChange={(e) => setSOAForm((f) => ({ ...f, retry: parseInt(e.target.value) || 1800 }))}
+                  min={60}
+                  className="w-full px-3 py-2 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] text-sm focus:outline-none focus:border-amber-500 transition-colors"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-[var(--muted-2)] uppercase tracking-wider mb-2">
+                  Expire (s)
+                </label>
+                <input
+                  type="number"
+                  value={soaForm.expire}
+                  onChange={(e) => setSOAForm((f) => ({ ...f, expire: parseInt(e.target.value) || 604800 }))}
+                  min={3600}
+                  className="w-full px-3 py-2 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] text-sm focus:outline-none focus:border-amber-500 transition-colors"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-[var(--muted-2)] uppercase tracking-wider mb-2">
+                  Minimum TTL (s)
+                </label>
+                <input
+                  type="number"
+                  value={soaForm.minimum}
+                  onChange={(e) => setSOAForm((f) => ({ ...f, minimum: parseInt(e.target.value) || 300 }))}
+                  min={0}
+                  className="w-full px-3 py-2 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] text-sm focus:outline-none focus:border-amber-500 transition-colors"
+                />
+              </div>
+            </div>
+
+            <div className="rounded-xl bg-[var(--surface)] border border-[var(--border)] px-3 py-2 flex items-center justify-between">
+              <span className="text-xs font-semibold text-[var(--muted-2)] uppercase tracking-wider">
+                Serial (nach Speichern)
+              </span>
+              <span className="font-mono text-sm text-amber-400">
+                {selectedZone?.soa ? nextSerial(selectedZone.soa.serial) : '—'}
+              </span>
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <button
+                onClick={() => setSOAModalOpen(false)}
+                disabled={savingSOA}
+                className="flex-1 px-4 py-2 rounded-xl border border-[var(--border)] text-[var(--muted-2)] text-sm hover:text-[var(--text)] hover:border-[var(--muted)] disabled:opacity-50 transition-colors"
+              >
+                Abbrechen
+              </button>
+              <MovingBorderButton
+                onClick={handleSaveSOA}
+                disabled={savingSOA || !soaForm.mname.trim() || !soaForm.rname.trim()}
+                className="flex-1"
+              >
+                {savingSOA
+                  ? <span className="flex items-center justify-center gap-2"><span className="inline-block w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" /> Speichert …</span>
+                  : 'Speichern'}
               </MovingBorderButton>
             </div>
           </div>
@@ -542,15 +723,15 @@ function ZonesContent() {
       <div className="p-4 lg:p-6 space-y-5">
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-base font-semibold text-[#f0eeff]">Zonen</h2>
-            <p className="text-xs text-[#6b5f8a]">
+            <h2 className="text-base font-semibold text-[var(--text)]">Zonen</h2>
+            <p className="text-xs text-[var(--muted)]">
               {zoneList.length} autoritative DNS-Zone{zoneList.length !== 1 ? 'n' : ''}
             </p>
           </div>
           <div className="flex items-center gap-2">
             <button
               onClick={() => setImportOpen(true)}
-              className="text-xs text-[#9a8cbf] hover:text-[#f0eeff] px-3 py-1.5 rounded-lg border border-[#2a1f42] hover:border-[#6b5f8a] transition-colors"
+              className="text-xs text-[var(--muted-2)] hover:text-[var(--text)] px-3 py-1.5 rounded-lg border border-[var(--border)] hover:border-[var(--muted)] transition-colors"
             >
               ↑ Importieren
             </button>
@@ -558,29 +739,29 @@ function ZonesContent() {
           </div>
         </div>
 
-        <div className="bg-[#100c1e] neon-card rounded-2xl overflow-hidden">
+        <div className="bg-[var(--surface-2)] neon-card rounded-2xl overflow-hidden">
           {zoneList.length > 0 ? (
-            <div className="divide-y divide-[#080612]">
+            <div className="divide-y divide-[var(--surface)]">
               {zoneList.map((z) => {
                 const isDeletingThis = deletingZone === z.domain
                 return (
                 <div
                   key={z.domain}
-                  className="flex items-center justify-between px-5 py-4 hover:bg-[#1a1230] transition-colors"
+                  className="flex items-center justify-between px-5 py-4 hover:bg-[var(--surface-3)] transition-colors"
                 >
                   <div
                     className="flex-1 cursor-pointer"
                     onClick={() => openZoneDetail(z.domain)}
                   >
                     <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium text-violet-400">{z.domain}</span>
+                      <span className="text-sm font-medium text-amber-400">{z.domain}</span>
                       {z.view && (
-                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-violet-900/40 text-violet-400 border border-violet-500/30">
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/30">
                           {z.view}
                         </span>
                       )}
                     </div>
-                    <div className="text-xs text-[#6b5f8a] mt-0.5">
+                    <div className="text-xs text-[var(--muted)] mt-0.5">
                       {(z.records ?? []).length} Records · TTL {z.ttl ?? 3600}s
                       {z.ttl_override ? ` · Override ${z.ttl_override}s` : ''}{' '}
                       {(z.records ?? [])
@@ -591,7 +772,7 @@ function ZonesContent() {
                             className="inline-flex items-center px-1.5 py-0 rounded text-[10px] font-bold ml-1"
                             style={{
                               background: (RECORD_TYPE_COLORS[r.type] ?? '#5a5a72') + '25',
-                              color: RECORD_TYPE_COLORS[r.type] ?? '#9a8cbf',
+                              color: RECORD_TYPE_COLORS[r.type] ?? '#9A9AAE',
                             }}
                           >
                             {r.type}
@@ -603,7 +784,7 @@ function ZonesContent() {
                     <button
                       onClick={() => openZoneDetail(z.domain)}
                       disabled={isDeletingThis}
-                      className="text-xs text-[#9a8cbf] hover:text-[#f0eeff] disabled:opacity-50 px-2 py-1 rounded border border-[#2a1f42] hover:border-[#6b5f8a] transition-colors"
+                      className="text-xs text-[var(--muted-2)] hover:text-[var(--text)] disabled:opacity-50 px-2 py-1 rounded border border-[var(--border)] hover:border-[var(--muted)] transition-colors"
                     >
                       Records
                     </button>
@@ -624,8 +805,8 @@ function ZonesContent() {
           ) : (
             <div className="flex flex-col items-center justify-center py-16 gap-3">
               <div className="text-3xl">🌐</div>
-              <div className="text-sm font-medium text-[#f0eeff]">Noch keine Zonen</div>
-              <div className="text-xs text-[#6b5f8a]">
+              <div className="text-sm font-medium text-[var(--text)]">Noch keine Zonen</div>
+              <div className="text-xs text-[var(--muted)]">
                 Erstellen Sie eine autoritative Zone, um DNS-Records zu verwalten.
               </div>
               <MovingBorderButton onClick={() => setAddZoneOpen(true)} className="mt-2">
@@ -643,15 +824,15 @@ function ZonesContent() {
         >
           <div className="space-y-4">
             {/* Tabs */}
-            <div className="flex gap-1 bg-[#080612] rounded-xl p-1">
+            <div className="flex gap-1 bg-[var(--surface)] rounded-xl p-1">
               {(['file', 'axfr'] as const).map((tab) => (
                 <button
                   key={tab}
                   onClick={() => setImportTab(tab)}
                   className={`flex-1 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
                     importTab === tab
-                      ? 'bg-violet-600/30 text-violet-300 border border-violet-500/50'
-                      : 'text-[#6b5f8a] hover:text-[#9a8cbf]'
+                      ? 'bg-amber-500/10 text-amber-400 border border-amber-500/30'
+                      : 'text-[var(--muted)] hover:text-[var(--muted-2)]'
                   }`}
                 >
                   {tab === 'file' ? 'Zone File' : 'AXFR Transfer'}
@@ -662,44 +843,44 @@ function ZonesContent() {
             {importTab === 'file' ? (
               <>
                 <div>
-                  <label className="block text-xs font-semibold text-[#9a8cbf] uppercase tracking-wider mb-2">
+                  <label className="block text-xs font-semibold text-[var(--muted-2)] uppercase tracking-wider mb-2">
                     Zone-Datei *
                   </label>
                   <input
                     type="file"
                     accept=".zone,.txt,text/plain"
                     onChange={(e) => setImportFile(e.target.files?.[0] ?? null)}
-                    className="w-full text-sm text-[#9a8cbf] file:mr-3 file:px-3 file:py-1 file:rounded-lg file:border file:border-[#2a1f42] file:bg-[#100c1e] file:text-[#9a8cbf] file:text-xs file:cursor-pointer hover:file:text-[#f0eeff] transition-colors cursor-pointer"
+                    className="w-full text-sm text-[var(--muted-2)] file:mr-3 file:px-3 file:py-1 file:rounded-lg file:border file:border-[var(--border)] file:bg-[var(--surface-2)] file:text-[var(--muted-2)] file:text-xs file:cursor-pointer hover:file:text-[var(--text)] transition-colors cursor-pointer"
                   />
-                  <p className="text-xs text-[#6b5f8a] mt-1">RFC 1035 Zonendatei (BIND-Format, z.B. example.zone)</p>
+                  <p className="text-xs text-[var(--muted)] mt-1">RFC 1035 Zonendatei (BIND-Format, z.B. example.zone)</p>
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-[#9a8cbf] uppercase tracking-wider mb-2">
+                  <label className="block text-xs font-semibold text-[var(--muted-2)] uppercase tracking-wider mb-2">
                     Domain (optional)
                   </label>
                   <input
                     value={importDomain}
                     onChange={(e) => setImportDomain(e.target.value)}
                     placeholder="example.com — wird aus SOA ermittelt"
-                    className="w-full px-3 py-2 rounded-xl bg-[#080612] border border-[#2a1f42] text-[#f0eeff] text-sm focus:outline-none focus:border-violet-500 transition-colors placeholder-[#6b5f8a]"
+                    className="w-full px-3 py-2 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] text-sm focus:outline-none focus:border-amber-500 transition-colors placeholder-[#5A5A6E]"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-[#9a8cbf] uppercase tracking-wider mb-2">
+                  <label className="block text-xs font-semibold text-[var(--muted-2)] uppercase tracking-wider mb-2">
                     View (optional)
                   </label>
                   <input
                     value={importView}
                     onChange={(e) => setImportView(e.target.value)}
                     placeholder="internal"
-                    className="w-full px-3 py-2 rounded-xl bg-[#080612] border border-[#2a1f42] text-[#f0eeff] text-sm focus:outline-none focus:border-violet-500 transition-colors placeholder-[#6b5f8a]"
+                    className="w-full px-3 py-2 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] text-sm focus:outline-none focus:border-amber-500 transition-colors placeholder-[#5A5A6E]"
                   />
                 </div>
                 <div className="flex gap-3 pt-1">
                   <button
                     onClick={() => { setImportOpen(false); setImportFile(null) }}
                     disabled={importing}
-                    className="flex-1 px-4 py-2 rounded-xl border border-[#2a1f42] text-[#9a8cbf] text-sm hover:text-[#f0eeff] disabled:opacity-50 transition-colors"
+                    className="flex-1 px-4 py-2 rounded-xl border border-[var(--border)] text-[var(--muted-2)] text-sm hover:text-[var(--text)] disabled:opacity-50 transition-colors"
                   >
                     Abbrechen
                   </button>
@@ -713,44 +894,44 @@ function ZonesContent() {
             ) : (
               <>
                 <div>
-                  <label className="block text-xs font-semibold text-[#9a8cbf] uppercase tracking-wider mb-2">
+                  <label className="block text-xs font-semibold text-[var(--muted-2)] uppercase tracking-wider mb-2">
                     DNS-Server *
                   </label>
                   <input
                     value={axfrServer}
                     onChange={(e) => setAxfrServer(e.target.value)}
                     placeholder="192.168.1.1 oder 192.168.1.1:53"
-                    className="w-full px-3 py-2 rounded-xl bg-[#080612] border border-[#2a1f42] text-[#f0eeff] text-sm focus:outline-none focus:border-violet-500 transition-colors placeholder-[#6b5f8a]"
+                    className="w-full px-3 py-2 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] text-sm focus:outline-none focus:border-amber-500 transition-colors placeholder-[#5A5A6E]"
                   />
-                  <p className="text-xs text-[#6b5f8a] mt-1">IP oder Hostname des Quell-DNS-Servers (Standard: Port 53)</p>
+                  <p className="text-xs text-[var(--muted)] mt-1">IP oder Hostname des Quell-DNS-Servers (Standard: Port 53)</p>
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-[#9a8cbf] uppercase tracking-wider mb-2">
+                  <label className="block text-xs font-semibold text-[var(--muted-2)] uppercase tracking-wider mb-2">
                     Domain *
                   </label>
                   <input
                     value={axfrDomain}
                     onChange={(e) => setAxfrDomain(e.target.value)}
                     placeholder="example.com"
-                    className="w-full px-3 py-2 rounded-xl bg-[#080612] border border-[#2a1f42] text-[#f0eeff] text-sm focus:outline-none focus:border-violet-500 transition-colors placeholder-[#6b5f8a]"
+                    className="w-full px-3 py-2 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] text-sm focus:outline-none focus:border-amber-500 transition-colors placeholder-[#5A5A6E]"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-[#9a8cbf] uppercase tracking-wider mb-2">
+                  <label className="block text-xs font-semibold text-[var(--muted-2)] uppercase tracking-wider mb-2">
                     View (optional)
                   </label>
                   <input
                     value={axfrView}
                     onChange={(e) => setAxfrView(e.target.value)}
                     placeholder="internal"
-                    className="w-full px-3 py-2 rounded-xl bg-[#080612] border border-[#2a1f42] text-[#f0eeff] text-sm focus:outline-none focus:border-violet-500 transition-colors placeholder-[#6b5f8a]"
+                    className="w-full px-3 py-2 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] text-sm focus:outline-none focus:border-amber-500 transition-colors placeholder-[#5A5A6E]"
                   />
                 </div>
                 <div className="flex gap-3 pt-1">
                   <button
                     onClick={() => setImportOpen(false)}
                     disabled={importing}
-                    className="flex-1 px-4 py-2 rounded-xl border border-[#2a1f42] text-[#9a8cbf] text-sm hover:text-[#f0eeff] disabled:opacity-50 transition-colors"
+                    className="flex-1 px-4 py-2 rounded-xl border border-[var(--border)] text-[var(--muted-2)] text-sm hover:text-[var(--text)] disabled:opacity-50 transition-colors"
                   >
                     Abbrechen
                   </button>
@@ -773,7 +954,7 @@ function ZonesContent() {
         >
           <div className="space-y-4">
             <div>
-              <label className="block text-xs font-semibold text-[#9a8cbf] uppercase tracking-wider mb-2">
+              <label className="block text-xs font-semibold text-[var(--muted-2)] uppercase tracking-wider mb-2">
                 Domain *
               </label>
               <input
@@ -781,26 +962,26 @@ function ZonesContent() {
                 onChange={(e) => setZoneDomain(e.target.value)}
                 placeholder="example.com"
                 autoFocus
-                className="w-full px-3 py-2 rounded-xl bg-[#080612] border border-[#2a1f42] text-[#f0eeff] text-sm focus:outline-none focus:border-violet-500 transition-colors"
+                className="w-full px-3 py-2 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] text-sm focus:outline-none focus:border-amber-500 transition-colors"
               />
-              <p className="text-xs text-[#6b5f8a] mt-1">z.B. example.com oder intern.home.lab</p>
+              <p className="text-xs text-[var(--muted)] mt-1">z.B. example.com oder intern.home.lab</p>
             </div>
             <div>
-              <label className="block text-xs font-semibold text-[#9a8cbf] uppercase tracking-wider mb-2">
+              <label className="block text-xs font-semibold text-[var(--muted-2)] uppercase tracking-wider mb-2">
                 View (optional)
               </label>
               <input
                 value={zoneView}
                 onChange={(e) => setZoneView(e.target.value)}
                 placeholder="internal"
-                className="w-full px-3 py-2 rounded-xl bg-[#080612] border border-[#2a1f42] text-[#f0eeff] text-sm focus:outline-none focus:border-violet-500 transition-colors"
+                className="w-full px-3 py-2 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] text-sm focus:outline-none focus:border-amber-500 transition-colors"
               />
-              <p className="text-xs text-[#6b5f8a] mt-1">
+              <p className="text-xs text-[var(--muted)] mt-1">
                 Split-Horizon: View-Name z.B. &quot;internal&quot;. Leer = global sichtbar.
               </p>
             </div>
             <div>
-              <label className="block text-xs font-semibold text-[#9a8cbf] uppercase tracking-wider mb-2">
+              <label className="block text-xs font-semibold text-[var(--muted-2)] uppercase tracking-wider mb-2">
                 Standard-TTL (Sekunden)
               </label>
               <input
@@ -808,11 +989,11 @@ function ZonesContent() {
                 value={zoneTtl}
                 onChange={(e) => setZoneTtl(parseInt(e.target.value) || 3600)}
                 min={60}
-                className="w-full px-3 py-2 rounded-xl bg-[#080612] border border-[#2a1f42] text-[#f0eeff] text-sm focus:outline-none focus:border-violet-500 transition-colors"
+                className="w-full px-3 py-2 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] text-sm focus:outline-none focus:border-amber-500 transition-colors"
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-[#9a8cbf] uppercase tracking-wider mb-2">
+              <label className="block text-xs font-semibold text-[var(--muted-2)] uppercase tracking-wider mb-2">
                 TTL-Override (optional, Sekunden)
               </label>
               <input
@@ -821,9 +1002,9 @@ function ZonesContent() {
                 onChange={(e) => setZoneTtlOverride(parseInt(e.target.value) || 0)}
                 min={60}
                 placeholder="Leer = kein Override"
-                className="w-full px-3 py-2 rounded-xl bg-[#080612] border border-[#2a1f42] text-[#f0eeff] text-sm focus:outline-none focus:border-violet-500 transition-colors placeholder-[#6b5f8a]"
+                className="w-full px-3 py-2 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] text-sm focus:outline-none focus:border-amber-500 transition-colors placeholder-[#5A5A6E]"
               />
-              <p className="text-xs text-[#6b5f8a] mt-1">
+              <p className="text-xs text-[var(--muted)] mt-1">
                 Normalisiert TTL aller Antworten dieser Zone. Nützlich für Clients mit TTL-Problemen.
               </p>
             </div>
@@ -831,7 +1012,7 @@ function ZonesContent() {
               <button
                 onClick={() => setAddZoneOpen(false)}
                 disabled={addingZone}
-                className="flex-1 px-4 py-2 rounded-xl border border-[#2a1f42] text-[#9a8cbf] text-sm hover:text-[#f0eeff] disabled:opacity-50 transition-colors"
+                className="flex-1 px-4 py-2 rounded-xl border border-[var(--border)] text-[var(--muted-2)] text-sm hover:text-[var(--text)] disabled:opacity-50 transition-colors"
               >
                 Abbrechen
               </button>
@@ -852,7 +1033,7 @@ export default function ZonesPage() {
   return (
     <Suspense fallback={
       <div className="flex items-center justify-center h-64">
-        <div className="w-6 h-6 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" />
+        <div className="w-6 h-6 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
       </div>
     }>
       <ZonesContent />

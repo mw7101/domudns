@@ -39,7 +39,7 @@ export function InfoTooltip({ text, position = 'top' }: InfoTooltipProps) {
         ref={ref}
         type="button"
         aria-label="Info"
-        className="text-[#6b5f8a] hover:text-[#9a8cbf] transition-colors focus:outline-none"
+        className="text-[var(--muted)] hover:text-[var(--muted-2)] transition-colors focus:outline-none"
         onMouseEnter={() => setVisible(true)}
         onMouseLeave={() => setVisible(false)}
         onClick={() => setVisible((v) => !v)}
@@ -70,12 +70,11 @@ export function InfoTooltip({ text, position = 'top' }: InfoTooltipProps) {
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.92 }}
             transition={{ duration: 0.12 }}
-            className={`absolute ${positionClass} z-50 w-56 max-w-xs px-3 py-2 rounded-xl bg-[#100c1e] border border-[#2a1f42] shadow-xl`}
+            className={`absolute ${positionClass} z-50 w-56 max-w-xs px-3 py-2 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] shadow-xl`}
           >
-            <p className="text-xs text-[#9a8cbf] leading-relaxed">{text}</p>
-            {/* Small arrow for "top" position */}
+            <p className="text-xs text-[var(--muted-2)] leading-relaxed">{text}</p>
             {position === 'top' && (
-              <span className="absolute left-1/2 -translate-x-1/2 -bottom-[5px] w-2.5 h-2.5 bg-[#100c1e] border-b border-r border-[#2a1f42] rotate-45" />
+              <span className="absolute left-1/2 -translate-x-1/2 -bottom-[5px] w-2.5 h-2.5 bg-[var(--surface-2)] border-b border-r border-[var(--border)] rotate-45" />
             )}
           </motion.div>
         )}

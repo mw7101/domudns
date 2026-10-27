@@ -47,6 +47,8 @@ type ServerOptions struct {
 	SplitHorizonHandler *api.SplitHorizonHandler
 	// DHCPHandler enables GET /api/dhcp/leases and GET /api/dhcp/status.
 	DHCPHandler *api.DHCPHandler
+	// CacheHandler enables /api/cache endpoints (nil = cache disabled).
+	CacheHandler *api.CacheHandler
 }
 
 // NewServer creates a new HTTP server with API and Web UI.
@@ -122,6 +124,10 @@ func newServerWithOpts(cfg *config.Config, authManager *api.AuthManager, store a
 	router.SetAPIKeysHandler(apiKeysHandler)
 	// Register zone import/export handler
 	router.SetImportExportHandler(api.NewImportExportHandler(store, zoneReload))
+	// Register cache handler
+	if opts.CacheHandler != nil {
+		router.SetCacheHandler(opts.CacheHandler)
+	}
 	// middlewareCtx is used to stop background goroutines (e.g. rate limiter cleanup) on shutdown.
 	// cancelMiddleware is called in Shutdown() to release resources.
 	middlewareCtx, cancelMiddleware := context.WithCancel(context.Background())

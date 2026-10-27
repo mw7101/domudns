@@ -22,3 +22,6 @@ internal/caddy/web/*
 # MCP-Konfiguration (lokale Entwicklungstools, nicht ins Repo)
 .mcp.json
 
+.superpowers/*.*
+.superpowers/*/*
+
