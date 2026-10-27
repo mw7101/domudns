@@ -89,6 +89,60 @@ func TestFileStore_Records(t *testing.T) {
 	assert.Len(t, records, 0)
 }
 
+func TestFileStore_PutRecord_IncrementsSOASerial(t *testing.T) {
+	ctx := context.Background()
+	fs, _ := newTestStore(t)
+
+	zone := &dns.Zone{
+		Domain:  "serial.local",
+		TTL:     3600,
+		Records: []dns.Record{},
+		SOA:     &dns.SOA{Serial: 2020010100},
+	}
+	require.NoError(t, fs.PutZone(ctx, zone))
+
+	rec := &dns.Record{Name: "a", Type: dns.TypeA, TTL: 300, Value: "10.0.0.1"}
+	require.NoError(t, fs.PutRecord(ctx, "serial.local", rec))
+
+	got, err := fs.GetZone(ctx, "serial.local")
+	require.NoError(t, err)
+	require.NotNil(t, got.SOA)
+	assert.Greater(t, got.SOA.Serial, uint32(2020010100), "serial must be incremented after PutRecord")
+
+	// Second PutRecord must increment again
+	serial1 := got.SOA.Serial
+	rec2 := &dns.Record{Name: "b", Type: dns.TypeA, TTL: 300, Value: "10.0.0.2"}
+	require.NoError(t, fs.PutRecord(ctx, "serial.local", rec2))
+	got, err = fs.GetZone(ctx, "serial.local")
+	require.NoError(t, err)
+	assert.Greater(t, got.SOA.Serial, serial1, "serial must increase on each PutRecord")
+}
+
+func TestFileStore_DeleteRecord_IncrementsSOASerial(t *testing.T) {
+	ctx := context.Background()
+	fs, _ := newTestStore(t)
+
+	zone := &dns.Zone{
+		Domain:  "delserial.local",
+		TTL:     3600,
+		Records: []dns.Record{},
+		SOA:     &dns.SOA{Serial: 2020010100},
+	}
+	require.NoError(t, fs.PutZone(ctx, zone))
+
+	rec := &dns.Record{Name: "x", Type: dns.TypeA, TTL: 300, Value: "10.1.1.1"}
+	require.NoError(t, fs.PutRecord(ctx, "delserial.local", rec))
+
+	got, err := fs.GetZone(ctx, "delserial.local")
+	require.NoError(t, err)
+	serialAfterAdd := got.SOA.Serial
+
+	require.NoError(t, fs.DeleteRecord(ctx, "delserial.local", rec.ID))
+	got, err = fs.GetZone(ctx, "delserial.local")
+	require.NoError(t, err)
+	assert.Greater(t, got.SOA.Serial, serialAfterAdd, "serial must be incremented after DeleteRecord")
+}
+
 func TestFileStore_Auth(t *testing.T) {
 	ctx := context.Background()
 	fs, _ := newTestStore(t)

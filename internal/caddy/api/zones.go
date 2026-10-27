@@ -7,31 +7,22 @@ import (
 	"strings"
 
 	"github.com/mw7101/domudns/internal/dns"
+	"github.com/mw7101/domudns/internal/store"
 	"github.com/rs/zerolog/log"
 )
-
-// ZoneStore abstracts zone persistence.
-type ZoneStore interface {
-	GetZone(ctx context.Context, domain string) (*dns.Zone, error)
-	GetZoneView(ctx context.Context, domain, view string) (*dns.Zone, error)
-	ListZones(ctx context.Context) ([]*dns.Zone, error)
-	PutZone(ctx context.Context, zone *dns.Zone) error
-	DeleteZone(ctx context.Context, domain string) error
-	DeleteZoneView(ctx context.Context, domain, view string) error
-}
 
 // ZoneReloader is called after zone/record changes to reload in-memory zones in the DNS server.
 type ZoneReloader func() error
 
 // ZonesHandler handles zone CRUD operations.
 type ZonesHandler struct {
-	store      ZoneStore
+	store      store.ZoneStore
 	zoneReload ZoneReloader
 }
 
 // NewZonesHandler creates a zones handler.
 // zoneReload is optional - if provided, it will be called after mutating operations.
-func NewZonesHandler(store ZoneStore, zoneReload ZoneReloader) *ZonesHandler {
+func NewZonesHandler(store store.ZoneStore, zoneReload ZoneReloader) *ZonesHandler {
 	return &ZonesHandler{store: store, zoneReload: zoneReload}
 }
 

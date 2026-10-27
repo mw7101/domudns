@@ -2,6 +2,39 @@
 
 All notable changes to DomU DNS will be documented in this file.
 
+## [v0.3.0]
+
+### Breaking Changes
+
+- **`POST /api/zones/{domain}/records?auto_ptr=true` response shape changed**: When `auto_ptr=true` is passed and PTR creation fails partially, the server now returns HTTP 207 Multi-Status instead of 201 Created. Additionally, the response body is no longer a plain `Record` object but a `CreateRecordResponse` envelope `{"record": {...}, "ptr": {...}}`. Clients that check for `201` explicitly or parse the body as a bare record object must be updated. Clients that do not use `?auto_ptr=true` are unaffected.
+
+### Fixed
+
+- SOA serial number was never incremented when adding, updating, or deleting records via REST API, DHCP sync, or RFC 2136 DDNS — zone transfers (AXFR/IXFR) and DNS caches therefore did not detect changes; fixed by incrementing the serial (YYYYMMDDnn convention) in `filestore.PutRecord` and `filestore.DeleteRecord`
+
+### Changed
+- Refactored DNS pipeline into 8 phase files; handler.go reduced from 444 to ~200 LOC
+- Consolidated store interfaces into internal/store/interfaces.go (read/write split)
+- Added minimal provider interfaces for DNS pipeline in internal/dnsserver/deps.go
+- Split blocklist.go (722 LOC) into 4 focused files
+- Split import_export.go (565 LOC) into 3 focused files
+- Unified config live-reload under Server.ApplyConfig; eliminates race window
+- Added dashboard useApiRequest/useZones/useRecords hooks; removed fetch-state duplication
+- Added ErrorDisplay component for unified error handling in dashboard
+
+### Added (tests)
+- Cache concurrency race test (go test -race)
+- ZoneManager view-awareness test (SplitHorizon)
+- DHCP cross-parser test (dhcpd/dnsmasq with identical fixtures)
+- Cluster sync integration tests (HTTP push + HMAC validation)
+
+### Added
+- **Auto-PTR**: When creating an A or AAAA record, an optional toggle in the record modal (default: ON) automatically creates the corresponding PTR record in the matching reverse zone. Supports IPv4 (`in-addr.arpa` /24 zones) and IPv6 (`ip6.arpa` /64 zones). If the reverse zone does not yet exist, it is created automatically with a default SOA. PTR always targets the global (view-less) reverse zone. The API supports `?auto_ptr=true` on `POST /api/zones/{domain}/records`; on partial failure (A/AAAA record written, PTR failed) the response is HTTP 207. DHCP lease sync now also auto-creates the reverse zone if missing, so PTR records are always written for new leases.
+
+### Fixed
+- **Queries per hour chart missing history**: The "Anfragen pro Stunde" bar chart in the dashboard now reads hourly aggregates from SQLite when persistence is enabled, instead of only using the in-memory ring buffer. Previously, after the ring buffer (default 5000 entries) was full, data older than the last few hours was silently discarded, causing the chart to show only the most recent ~3 hours even after 12+ hours of uptime.
+- **Monitoring chart colors**: The "Errors/s" line in the monitoring chart now uses orange (`#f97316`) instead of amber, making it visually distinct from the "Queries/s" line.
+
 ## [v0.2.0]
 
 ### Added

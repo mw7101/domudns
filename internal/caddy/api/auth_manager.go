@@ -21,7 +21,7 @@ type AuthManager struct {
 	mu       sync.RWMutex
 	store    store.AuthStore
 	cfg      *store.AuthConfig
-	keyStore NamedAPIKeyStore // nil until SetNamedKeyStore is called
+	keyStore store.NamedAPIKeyStore // nil until SetNamedKeyStore is called
 }
 
 // NewAuthManager loads the auth configuration from the store.
@@ -94,7 +94,7 @@ func (am *AuthManager) ValidatePassword(username, password string) bool {
 }
 
 // SetNamedKeyStore sets the named API key store for ValidateAnyKey.
-func (am *AuthManager) SetNamedKeyStore(s NamedAPIKeyStore) {
+func (am *AuthManager) SetNamedKeyStore(s store.NamedAPIKeyStore) {
 	am.mu.Lock()
 	am.keyStore = s
 	am.mu.Unlock()

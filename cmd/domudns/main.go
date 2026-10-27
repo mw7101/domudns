@@ -191,10 +191,10 @@ func main() {
 	}
 	dnsServer.SetDDNSHandler(ddnsHandler)
 
-	// Load blocklist (FileStore implements BlocklistStore directly)
-	var blocklistStore dnsserver.BlocklistStore
+	// Load blocklist (FileStore implements BlocklistProvider directly)
+	var blocklistStore dnsserver.BlocklistProvider
 	if cfg.Blocklist.Enabled {
-		// PropagatingStore or FileStore: both implement BlocklistStore via FileStore
+		// PropagatingStore or FileStore: both implement BlocklistProvider via FileStore
 		switch s := store.(type) {
 		case *cluster.PropagatingStore:
 			blocklistStore = s.FileStore
@@ -209,7 +209,7 @@ func main() {
 	}
 
 	// Load authoritative zones
-	var zoneStore dnsserver.ZoneStore
+	var zoneStore dnsserver.ZoneProvider
 	switch s := store.(type) {
 	case *cluster.PropagatingStore:
 		zoneStore = s.FileStore
@@ -387,7 +387,8 @@ func main() {
 	}
 
 	// Set initial block mode from config
-	dnsServer.UpdateBlockMode(cfg.Blocklist.BlockMode)
+	blockMode := cfg.Blocklist.BlockMode
+	dnsServer.ApplyConfig(dnsserver.ConfigUpdate{BlockMode: &blockMode})
 
 	// Initialize split-horizon resolver (nil when disabled)
 	if cfg.DNSServer.SplitHorizon.Enabled {
@@ -404,13 +405,19 @@ func main() {
 
 	// Config live-reload: upstream, conditional_forwards, block_mode, rebinding, split_horizon, axfr + log_level applicable without restart
 	configReloader := func(updatedCfg *config.Config) error {
-		dnsServer.UpdateUpstream(updatedCfg.DNSServer.Upstream)
-		dnsServer.UpdateConditionalForwards(toConditionalForwardRules(updatedCfg.DNSServer.ConditionalForwards))
-		dnsServer.UpdateBlockMode(updatedCfg.Blocklist.BlockMode)
-		dnsServer.UpdateRebindingProtection(
-			updatedCfg.System.Security.RebindingProtection,
-			updatedCfg.System.Security.RebindingProtectionWhitelist,
-		)
+		// Apply upstream, conditional forwards, rebinding and block mode atomically
+		// under a single Server.mu to eliminate the race window between individual calls.
+		rebindingEnabled := updatedCfg.System.Security.RebindingProtection
+		blockMode := updatedCfg.Blocklist.BlockMode
+		logLevel := updatedCfg.System.LogLevel
+		dnsServer.ApplyConfig(dnsserver.ConfigUpdate{
+			Upstream:            updatedCfg.DNSServer.Upstream,
+			ConditionalForwards: toConditionalForwardRules(updatedCfg.DNSServer.ConditionalForwards),
+			RebindingEnabled:    &rebindingEnabled,
+			RebindingWhitelist:  updatedCfg.System.Security.RebindingProtectionWhitelist,
+			BlockMode:           &blockMode,
+			LogLevel:            &logLevel,
+		})
 		splitHorizonMu.Lock()
 		localResolver := splitHorizonResolver
 		splitHorizonMu.Unlock()
@@ -426,7 +433,6 @@ func main() {
 				log.Warn().Err(err).Msg("AXFR: failed to update AllowedIPs")
 			}
 		}
-		logger.SetLevel(updatedCfg.System.LogLevel)
 		return nil
 	}
 

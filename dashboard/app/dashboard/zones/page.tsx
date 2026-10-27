@@ -6,8 +6,9 @@ import { Topbar } from '@/components/layout/Topbar'
 import { AnimatedModal } from '@/components/ui/animated-modal'
 import { MovingBorderButton } from '@/components/ui/moving-border'
 import { useToast } from '@/components/shared/Toast'
-import { zones as zonesApi, records as recordsApi, type Zone, type DnsRecord, type ImportResult, type SOA } from '@/lib/api'
+import { zones as zonesApi, records as recordsApi, type Zone, type DnsRecord, type ImportResult, type SOA, type CreateRecordResponse } from '@/lib/api'
 import { formatRecordValue, RECORD_TYPE_COLORS } from '@/lib/utils'
+import { useZones } from '@/lib/hooks/useZones'
 
 const RECORD_TYPES = ['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS', 'SRV', 'PTR', 'CAA', 'FWD']
 
@@ -38,9 +39,10 @@ function ZonesContent() {
   const { showToast } = useToast()
   const domainParam = searchParams.get('d')
 
-  const [zoneList, setZoneList] = useState<Zone[]>([])
+  const zonesState = useZones()
+  const zoneList = zonesState.data ?? []
+  const loading = zonesState.loading
   const [selectedZone, setSelectedZone] = useState<Zone | null>(null)
-  const [loading, setLoading] = useState(true)
 
   // Loading states for actions
   const [addingZone, setAddingZone] = useState(false)
@@ -84,6 +86,7 @@ function ZonesContent() {
   const [recordModalOpen, setRecordModalOpen] = useState(false)
   const [editingRecord, setEditingRecord] = useState<DnsRecord | null>(null)
   const [recordDomain, setRecordDomain] = useState('')
+  const [autoPtr, setAutoPtr] = useState(true)
   const [rForm, setRForm] = useState({
     name: '@',
     type: 'A',
@@ -95,16 +98,7 @@ function ZonesContent() {
     tag: 'issue',
   })
 
-  const loadZones = useCallback(async () => {
-    try {
-      const res = await zonesApi.list()
-      setZoneList(res.data ?? [])
-    } catch {
-      showToast('Fehler beim Laden der Zonen', 'error')
-    } finally {
-      setLoading(false)
-    }
-  }, [showToast])
+  const loadZones = zonesState.refetch
 
   const loadZoneDetail = useCallback(
     async (domain: string, view?: string) => {
@@ -119,10 +113,6 @@ function ZonesContent() {
     },
     [showToast]
   )
-
-  useEffect(() => {
-    loadZones()
-  }, [loadZones])
 
   useEffect(() => {
     if (domainParam) loadZoneDetail(domainParam)
@@ -184,6 +174,7 @@ function ZonesContent() {
   const openRecordModal = (domain: string, record?: DnsRecord) => {
     setRecordDomain(domain)
     setEditingRecord(record ?? null)
+    setAutoPtr(true)
     setRForm({
       name: record?.name ?? '@',
       type: record?.type ?? 'A',
@@ -219,8 +210,19 @@ function ZonesContent() {
         await recordsApi.update(recordDomain, editingRecord.id, { ...payload, id: editingRecord.id })
         showToast('Record gespeichert')
       } else {
-        await recordsApi.create(recordDomain, payload)
-        showToast('Record hinzugefügt')
+        const useAutoPtr = autoPtr && (rForm.type === 'A' || rForm.type === 'AAAA')
+        const res = await recordsApi.create(recordDomain, payload, useAutoPtr || undefined)
+        const data = (res as { data: CreateRecordResponse | DnsRecord }).data
+        if (useAutoPtr && data && 'ptr' in data && data.ptr) {
+          if (data.ptr.created) {
+            const zoneMsg = data.ptr.zone_created ? ` (Zone ${data.ptr.reverse_zone} erstellt)` : ''
+            showToast(`Record + PTR hinzugefügt${zoneMsg}`)
+          } else {
+            showToast(`Record hinzugefügt, PTR fehlgeschlagen: ${data.ptr.error ?? 'Unbekannt'}`, 'error')
+          }
+        } else {
+          showToast('Record hinzugefügt')
+        }
       }
       setRecordModalOpen(false)
       await loadZoneDetail(recordDomain, selectedZone?.view)
@@ -583,6 +585,23 @@ function ZonesContent() {
                   <option value="issuewild">issuewild</option>
                   <option value="iodef">iodef</option>
                 </select>
+              </div>
+            )}
+
+            {!editingRecord && (rForm.type === 'A' || rForm.type === 'AAAA') && (
+              <div className="flex items-center justify-between gap-4 py-2 border-t border-[var(--border)]">
+                <div>
+                  <div className="text-sm font-medium text-[var(--text)]">PTR automatisch erstellen</div>
+                  <div className="text-xs text-[var(--muted)]">Erstellt Reverse-DNS-Eintrag (ggf. inkl. Reverse-Zone)</div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setAutoPtr((v) => !v)}
+                  disabled={savingRecord}
+                  className={`relative inline-flex h-6 w-10 shrink-0 items-center rounded-full transition-colors disabled:opacity-50 ${autoPtr ? 'bg-amber-500' : 'bg-[var(--border)]'}`}
+                >
+                  <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${autoPtr ? 'translate-x-5' : 'translate-x-1'}`} />
+                </button>
               </div>
             )}
 

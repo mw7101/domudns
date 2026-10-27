@@ -157,6 +157,9 @@ func (s *FileStore) PutRecord(_ context.Context, zoneDomain string, record *dns.
 	if !found {
 		zone.Records = append(zone.Records, *record)
 	}
+	if zone.SOA != nil {
+		zone.SOA.IncrementSerial()
+	}
 	return s.saveZoneFile(zone)
 }
 
@@ -198,6 +201,9 @@ func (s *FileStore) DeleteRecord(_ context.Context, zoneDomain string, recordID 
 		}
 	}
 	zone.Records = newRecords
+	if zone.SOA != nil {
+		zone.SOA.IncrementSerial()
+	}
 	return s.saveZoneFile(zone)
 }
 

@@ -208,45 +208,18 @@ func (s *Server) SetDDNSHandler(d *DDNSHandler) {
 	}
 }
 
-// UpdateBlockMode sets the block response mode at runtime (no restart needed).
-// Valid values: "zero_ip" (default) | "nxdomain"
-func (s *Server) UpdateBlockMode(mode string) {
-	s.handler.UpdateBlockMode(mode)
-}
-
-// UpdateUpstream replaces the upstream DNS servers at runtime (no restart needed).
-func (s *Server) UpdateUpstream(upstream []string) {
-	s.handler.forwarder.UpdateUpstream(upstream)
-}
-
-// UpdateRebindingProtection updates rebinding protection settings at runtime.
-func (s *Server) UpdateRebindingProtection(enabled bool, whitelist []string) {
-	s.handler.UpdateRebindingProtection(enabled, whitelist)
-}
-
-// UpdateConditionalForwards replaces conditional forwarding rules at runtime (no restart needed).
-func (s *Server) UpdateConditionalForwards(rules []ConditionalForwardRule) {
-	if s.handler.conditionalForwarder == nil {
-		if len(rules) > 0 {
-			s.handler.conditionalForwarder = NewConditionalForwarder(rules)
-		}
-		return
-	}
-	s.handler.conditionalForwarder.UpdateRules(rules)
-}
-
 // LoadBlocklist loads blocklist domains and whitelist IPs from the store.
-func (s *Server) LoadBlocklist(ctx context.Context, store BlocklistStore) error {
+func (s *Server) LoadBlocklist(ctx context.Context, store BlocklistProvider) error {
 	return s.blocklist.Load(ctx, store)
 }
 
 // ReloadWhitelist reloads only whitelist IPs (lightweight cluster sync).
-func (s *Server) ReloadWhitelist(ctx context.Context, store BlocklistStore) error {
+func (s *Server) ReloadWhitelist(ctx context.Context, store BlocklistProvider) error {
 	return s.blocklist.ReloadWhitelist(ctx, store)
 }
 
 // LoadZones loads authoritative zones from the store.
-func (s *Server) LoadZones(ctx context.Context, store ZoneStore) error {
+func (s *Server) LoadZones(ctx context.Context, store ZoneProvider) error {
 	return s.zones.Load(ctx, store)
 }
 

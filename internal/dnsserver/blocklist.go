@@ -10,14 +10,6 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// BlocklistStore provides access to blocklist data from backend.
-type BlocklistStore interface {
-	GetBlockedDomains(ctx context.Context) ([]string, error)
-	GetWhitelistIPs(ctx context.Context) ([]string, error)
-	// GetBlocklistPatterns returns wildcard patterns (e.g. "*.ads.com") and regex patterns (e.g. "/^ads[0-9]+\\.com$/").
-	GetBlocklistPatterns(ctx context.Context) (wildcards []string, regexps []string, err error)
-}
-
 // BlocklistManager manages blocklist domains, wildcard/regex patterns, and whitelist IPs in-memory.
 type BlocklistManager struct {
 	domains   map[string]struct{} // Blocked domains (exact match)
@@ -66,7 +58,7 @@ func parseCIDRList(cidrs []string) []*net.IPNet {
 }
 
 // Load loads blocklist domains, patterns, and whitelist IPs from the store.
-func (b *BlocklistManager) Load(ctx context.Context, store BlocklistStore) error {
+func (b *BlocklistManager) Load(ctx context.Context, store BlocklistProvider) error {
 	// Load blocked domains
 	domains, err := store.GetBlockedDomains(ctx)
 	if err != nil {
@@ -147,7 +139,7 @@ func compileRegexps(patterns []string) []*regexp.Regexp {
 // ReloadWhitelist reloads only the whitelist IPs (without the 220k+ domains).
 // Called periodically on every cluster node so that whitelist changes made
 // via the API on another node are picked up.
-func (b *BlocklistManager) ReloadWhitelist(ctx context.Context, store BlocklistStore) error {
+func (b *BlocklistManager) ReloadWhitelist(ctx context.Context, store BlocklistProvider) error {
 	whitelistCIDRs, err := store.GetWhitelistIPs(ctx)
 	if err != nil {
 		return err

@@ -36,13 +36,13 @@ type DDNSStatsProvider interface {
 
 // DDNSAPIHandler manages TSIG keys for RFC 2136 DDNS via the REST API.
 type DDNSAPIHandler struct {
-	store         TSIGKeyStore
+	store         store.TSIGKeyStore
 	keyUpdater    DDNSKeyUpdater
 	statsProvider DDNSStatsProvider
 }
 
 // NewDDNSAPIHandler creates a new DDNSAPIHandler.
-func NewDDNSAPIHandler(store TSIGKeyStore, keyUpdater DDNSKeyUpdater) *DDNSAPIHandler {
+func NewDDNSAPIHandler(store store.TSIGKeyStore, keyUpdater DDNSKeyUpdater) *DDNSAPIHandler {
 	return &DDNSAPIHandler{
 		store:      store,
 		keyUpdater: keyUpdater,

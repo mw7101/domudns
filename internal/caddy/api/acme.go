@@ -8,22 +8,17 @@ import (
 	"time"
 
 	"github.com/mw7101/domudns/internal/dns"
+	"github.com/mw7101/domudns/internal/store"
 )
-
-// ACMEStore abstracts ACME challenge storage.
-type ACMEStore interface {
-	PutACMEChallenge(ctx context.Context, fqdn, value string, ttl time.Duration) error
-	DeleteACMEChallenge(ctx context.Context, fqdn string) error
-}
 
 // ACMEHandler handles ACME DNS-01 present/cleanup.
 type ACMEHandler struct {
-	store   ACMEStore
+	store   store.ACMEStore
 	ttlSecs int
 }
 
 // NewACMEHandler creates an ACME handler.
-func NewACMEHandler(store ACMEStore, ttlSecs int) *ACMEHandler {
+func NewACMEHandler(store store.ACMEStore, ttlSecs int) *ACMEHandler {
 	if ttlSecs <= 0 {
 		ttlSecs = 60
 	}

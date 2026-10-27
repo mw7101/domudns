@@ -170,6 +170,7 @@ func (q *QueryLogger) Query(f QueryLogFilter) QueryLogPage {
 }
 
 // Stats returns aggregated statistics.
+// QueriesPerHour is read from SQLite when available (ring buffer may not cover 24h).
 func (q *QueryLogger) Stats() QueryLogStats {
 	if q == nil {
 		return QueryLogStats{
@@ -179,7 +180,15 @@ func (q *QueryLogger) Stats() QueryLogStats {
 			QueriesPerHour: []HourStat{},
 		}
 	}
-	return q.ring.Stats()
+	stats := q.ring.Stats()
+	if q.sqlite != nil {
+		now := time.Now()
+		cutoff := now.Add(-24 * time.Hour)
+		if hourCounts, err := q.sqlite.HourlyStats(cutoff); err == nil {
+			stats.QueriesPerHour = buildHourStats(hourCounts, now)
+		}
+	}
+	return stats
 }
 
 // Len returns the current number of entries in the ring buffer.

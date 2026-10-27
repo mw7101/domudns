@@ -281,6 +281,30 @@ func createSchema(db *sql.DB) error {
 	return nil
 }
 
+// HourlyStats gibt die Anzahl der Queries pro Stunde für die letzten 24h zurück.
+// Wird verwendet wenn der In-Memory-Ringbuffer nicht die gesamte History enthält.
+func (s *SQLiteStore) HourlyStats(cutoff time.Time) (map[time.Time]int64, error) {
+	const usPerHour = int64(time.Hour / time.Microsecond)
+	rows, err := s.db.Query(
+		`SELECT (ts / ?) * ? AS hour_ts, COUNT(*) FROM query_log WHERE ts >= ? GROUP BY hour_ts ORDER BY hour_ts`,
+		usPerHour, usPerHour, cutoff.UnixMicro(),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("hourly stats query: %w", err)
+	}
+	defer rows.Close()
+
+	counts := make(map[time.Time]int64)
+	for rows.Next() {
+		var hourTS, count int64
+		if err := rows.Scan(&hourTS, &count); err != nil {
+			return nil, fmt.Errorf("scan hourly stats: %w", err)
+		}
+		counts[time.UnixMicro(hourTS)] = count
+	}
+	return counts, rows.Err()
+}
+
 // buildWhereClause baut die WHERE-Klausel aus einem QueryLogFilter.
 func buildWhereClause(f QueryLogFilter) (string, []interface{}) {
 	var conditions []string

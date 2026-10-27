@@ -2,6 +2,7 @@ package dns
 
 import (
 	"testing"
+	"time"
 )
 
 func TestValidateRecord(t *testing.T) {
@@ -246,4 +247,35 @@ func TestValidateZone(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestSOA_IncrementSerial(t *testing.T) {
+	t.Run("serial behind today is reset to today+1", func(t *testing.T) {
+		soa := &SOA{Serial: 2020010100}
+		soa.IncrementSerial()
+		today := time.Now()
+		todayPrefix := uint32(today.Year())*1000000 + uint32(today.Month())*10000 + uint32(today.Day())*100
+		if soa.Serial != todayPrefix+1 {
+			t.Errorf("want %d, got %d", todayPrefix+1, soa.Serial)
+		}
+	})
+
+	t.Run("serial at today is incremented by one", func(t *testing.T) {
+		today := time.Now()
+		todayPrefix := uint32(today.Year())*1000000 + uint32(today.Month())*10000 + uint32(today.Day())*100
+		soa := &SOA{Serial: todayPrefix + 5}
+		soa.IncrementSerial()
+		if soa.Serial != todayPrefix+6 {
+			t.Errorf("want %d, got %d", todayPrefix+6, soa.Serial)
+		}
+	})
+
+	t.Run("serial ahead of today is incremented by one", func(t *testing.T) {
+		soa := &SOA{Serial: 4000010100}
+		before := soa.Serial
+		soa.IncrementSerial()
+		if soa.Serial != before+1 {
+			t.Errorf("want %d, got %d", before+1, soa.Serial)
+		}
+	})
 }
