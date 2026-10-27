@@ -31,6 +31,8 @@ const (
 	EventBlocklistPatterns SyncEventType = "blocklist_patterns"
 	// EventTSIGKeys: data = []store.TSIGKey
 	EventTSIGKeys SyncEventType = "tsig_keys"
+	// EventAPIKeys: data = []store.NamedAPIKey (including Key field for validation on slaves)
+	EventAPIKeys SyncEventType = "api_keys"
 )
 
 // SyncRequest is the HTTP body for POST /api/internal/sync.
@@ -57,5 +59,6 @@ type MasterStateResponse struct {
 	ConfigOverrides   json.RawMessage `json:"config_overrides"`   // map[string]interface{}
 	BlocklistPatterns json.RawMessage `json:"blocklist_patterns"` // []store.BlocklistPattern
 	TSIGKeys          json.RawMessage `json:"tsig_keys"`          // []store.TSIGKey
+	NamedAPIKeys      json.RawMessage `json:"named_api_keys"`     // []store.NamedAPIKey (with Key field)
 	// URLDomains is transmitted separately via EventURLDomains (too large for state response)
 }

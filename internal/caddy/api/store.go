@@ -13,7 +13,16 @@ type TSIGKeyStore interface {
 	DeleteTSIGKey(ctx context.Context, name string) error
 }
 
-// Store combines ZoneStore, RecordStore, ACMEStore, BlocklistStore, AuthStore, TSIGKeyStore and HealthCheck.
+// NamedAPIKeyStore manages named API keys for external tool authentication.
+type NamedAPIKeyStore interface {
+	CreateNamedAPIKey(ctx context.Context, name, description string) (*store.NamedAPIKey, error)
+	ListNamedAPIKeys(ctx context.Context) ([]store.NamedAPIKey, error)
+	DeleteNamedAPIKey(ctx context.Context, id string) error
+	ValidateNamedAPIKey(ctx context.Context, key string) bool
+}
+
+// Store combines ZoneStore, RecordStore, ACMEStore, BlocklistStore, AuthStore, TSIGKeyStore,
+// NamedAPIKeyStore and HealthCheck.
 // Implemented by *filestore.FileStore and *cluster.PropagatingStore.
 type Store interface {
 	ZoneStore
@@ -22,5 +31,6 @@ type Store interface {
 	BlocklistStore
 	store.AuthStore
 	TSIGKeyStore
+	NamedAPIKeyStore
 	HealthCheck(ctx context.Context) error
 }

@@ -467,6 +467,45 @@ export const dhcpLeaseSync = {
 }
 
 /** Checks the reachability of a remote node by its full URL (e.g. http://192.0.2.152:80). */
+// ─── Named API Keys ───────────────────────────────────────────────────────────
+
+export interface NamedAPIKey {
+  id: string
+  name: string
+  description?: string
+  created_at: string
+}
+
+export interface CreateNamedAPIKeyResponse extends NamedAPIKey {
+  key: string // only set on creation, never returned again
+}
+
+export async function listNamedAPIKeys(): Promise<NamedAPIKey[]> {
+  const res = await request<{ success: boolean; data: NamedAPIKey[] }>('/auth/api-keys')
+  return res.data ?? []
+}
+
+export async function createNamedAPIKey(
+  name: string,
+  description?: string
+): Promise<CreateNamedAPIKeyResponse> {
+  const res = await request<{ success: boolean; data: CreateNamedAPIKeyResponse }>(
+    '/auth/api-keys',
+    {
+      method: 'POST',
+      body: JSON.stringify({ name, description: description ?? '' }),
+    }
+  )
+  return res.data
+}
+
+export async function deleteNamedAPIKey(id: string): Promise<void> {
+  await fetch(API_BASE + `/auth/api-keys/${id}`, {
+    method: 'DELETE',
+    headers: authHeaders(),
+  })
+}
+
 export async function checkNodeHealth(nodeUrl: string): Promise<{ online: boolean; status: string }> {
   try {
     const ctrl = new AbortController()

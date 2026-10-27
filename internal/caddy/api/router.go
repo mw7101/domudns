@@ -20,6 +20,7 @@ type Router struct {
 	ddns               *DDNSAPIHandler
 	splitHorizon       *SplitHorizonHandler // /api/split-horizon (nil if not configured)
 	dhcpHandler        *DHCPHandler         // /api/dhcp/* (nil if not configured)
+	apiKeys            *APIKeysHandler      // /api/auth/api-keys (nil if not configured)
 	auth               *AuthManager
 	setup              *SetupHandler
 	authHandler        *AuthHandler
@@ -80,6 +81,11 @@ func (r *Router) SetSplitHorizonHandler(h *SplitHorizonHandler) {
 // SetDHCPHandler sets the DHCP lease sync handler.
 func (r *Router) SetDHCPHandler(h *DHCPHandler) {
 	r.dhcpHandler = h
+}
+
+// SetAPIKeysHandler sets the named API keys handler.
+func (r *Router) SetAPIKeysHandler(h *APIKeysHandler) {
+	r.apiKeys = h
 }
 
 // SetClusterHandler sets the cluster handler for /api/internal/*.
@@ -154,6 +160,8 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	var handler http.Handler
 	if r.metricsEnabled && r.metrics != nil && (path == "/api/metrics" || strings.HasPrefix(path, "/api/metrics/")) {
 		handler = r.metrics
+	} else if r.apiKeys != nil && (path == "/api/auth/api-keys" || strings.HasPrefix(path, "/api/auth/api-keys/")) {
+		handler = r.apiKeys
 	} else if strings.HasPrefix(path, "/api/auth/") {
 		handler = r.authHandler
 	} else {
@@ -171,7 +179,7 @@ func (r *Router) apiHandler(req *http.Request) http.Handler {
 			return r.records
 		}
 		return r.zones
-	case strings.HasPrefix(path, "/api/acme/dns-01"):
+	case strings.HasPrefix(path, "/api/acme/dns-01"), strings.HasPrefix(path, "/api/acme/httpreq/"):
 		return r.acme
 	case path == "/api/config":
 		return r.config

@@ -14,6 +14,9 @@ import {
   splitHorizon as splitHorizonApi,
   blocklist as blocklistApi,
   ddns as ddnsApi,
+  listNamedAPIKeys,
+  createNamedAPIKey,
+  deleteNamedAPIKey,
   type Config,
   type SplitHorizonConfig,
   type AXFRConfig,
@@ -21,6 +24,8 @@ import {
   type BlocklistPattern,
   type TSIGKey,
   type TSIGKeyCreateResponse,
+  type NamedAPIKey,
+  type CreateNamedAPIKeyResponse,
 } from '@/lib/api'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -1440,6 +1445,29 @@ function SecurityTab() {
   const [newKey, setNewKey] = useState('')
   const [generatingKey, setGeneratingKey] = useState(false)
 
+  // Named API Keys
+  const [namedKeys, setNamedKeys] = useState<NamedAPIKey[]>([])
+  const [namedKeysLoading, setNamedKeysLoading] = useState(true)
+  const [newNamedKeyOpen, setNewNamedKeyOpen] = useState(false)
+  const [newNamedKeyName, setNewNamedKeyName] = useState('')
+  const [newNamedKeyDesc, setNewNamedKeyDesc] = useState('')
+  const [creatingNamedKey, setCreatingNamedKey] = useState(false)
+  const [createdKey, setCreatedKey] = useState<CreateNamedAPIKeyResponse | null>(null)
+  const [copied, setCopied] = useState(false)
+
+  const loadNamedKeys = useCallback(async () => {
+    try {
+      const keys = await listNamedAPIKeys()
+      setNamedKeys(keys)
+    } catch {
+      // ignore — keys may not be available yet
+    } finally {
+      setNamedKeysLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { loadNamedKeys() }, [loadNamedKeys])
+
   const handleChangePassword = async () => {
     if (newPw.length < 8) { showToast('Passwort muss mindestens 8 Zeichen lang sein', 'error'); return }
     if (changingPassword) return
@@ -1466,6 +1494,39 @@ function SecurityTab() {
     } finally { setGeneratingKey(false) }
   }
 
+  const handleCreateNamedKey = async () => {
+    if (!newNamedKeyName.trim() || creatingNamedKey) return
+    setCreatingNamedKey(true)
+    try {
+      const key = await createNamedAPIKey(newNamedKeyName.trim(), newNamedKeyDesc.trim() || undefined)
+      setCreatedKey(key)
+      setNewNamedKeyOpen(false)
+      setNewNamedKeyName('')
+      setNewNamedKeyDesc('')
+      await loadNamedKeys()
+    } catch (err: unknown) {
+      showToast(err instanceof Error ? err.message : 'Fehler beim Erstellen', 'error')
+    } finally { setCreatingNamedKey(false) }
+  }
+
+  const handleDeleteNamedKey = async (id: string, name: string) => {
+    try {
+      await deleteNamedAPIKey(id)
+      showToast(`API-Schlüssel "${name}" gelöscht`)
+      await loadNamedKeys()
+    } catch (err: unknown) {
+      showToast(err instanceof Error ? err.message : 'Fehler beim Löschen', 'error')
+    }
+  }
+
+  const handleCopyKey = () => {
+    if (!createdKey) return
+    navigator.clipboard.writeText(createdKey.key).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    })
+  }
+
   return (
     <div className="space-y-4 max-w-2xl">
       <Card title="Zugangsdaten">
@@ -1477,12 +1538,49 @@ function SecurityTab() {
           </button>
         </div>
         <div className="border-t border-[#2a1f42] pt-4">
-          <div className="text-sm font-medium text-[#f0eeff] mb-1">API-Key</div>
-          <div className="text-xs text-[#6b5f8a] mb-3">Für programmatischen Zugriff via Bearer Token (curl, Scripts)</div>
+          <div className="text-sm font-medium text-[#f0eeff] mb-1">Root-API-Key</div>
+          <div className="text-xs text-[#6b5f8a] mb-3">Haupt-Key für programmatischen Zugriff via Bearer Token (curl, Scripts)</div>
           <button onClick={() => setKeyOpen(true)} className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500/20 to-red-500/20 border border-amber-500/30 text-sm text-amber-400 hover:text-amber-300 transition-colors">
-            Neuen API-Key generieren …
+            Neuen Root-Key generieren …
           </button>
         </div>
+      </Card>
+
+      {/* Named API Keys */}
+      <Card title="API-Schlüssel">
+        <div className="text-xs text-[#6b5f8a] mb-4">
+          Dedizierte Keys für externe Tools (Traefik, Certbot, acme.sh, Proxmox). Jeder Key kann einzeln widerrufen werden.
+        </div>
+        {namedKeysLoading ? (
+          <div className="flex items-center gap-2 text-xs text-[#6b5f8a]"><Spinner /> Laden …</div>
+        ) : namedKeys.length === 0 ? (
+          <div className="text-xs text-[#6b5f8a] italic mb-3">Noch keine API-Schlüssel erstellt.</div>
+        ) : (
+          <div className="space-y-2 mb-4">
+            {namedKeys.map((k) => (
+              <div key={k.id} className="flex items-center gap-3 p-3 rounded-xl bg-[#080612] border border-[#2a1f42]">
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium text-[#f0eeff] truncate">{k.name}</div>
+                  {k.description && <div className="text-xs text-[#6b5f8a] truncate">{k.description}</div>}
+                  <div className="text-xs text-[#4a3f6a] mt-0.5">Erstellt: {new Date(k.created_at).toLocaleDateString('de-DE', { dateStyle: 'medium' })}</div>
+                </div>
+                <button
+                  onClick={() => handleDeleteNamedKey(k.id, k.name)}
+                  className="shrink-0 p-1.5 rounded-lg text-red-400 hover:text-red-300 hover:bg-red-900/20 transition-colors"
+                  title="Schlüssel löschen"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        <button
+          onClick={() => setNewNamedKeyOpen(true)}
+          className="px-4 py-2 rounded-xl bg-violet-600/20 border border-violet-500/30 text-sm text-violet-400 hover:text-violet-300 hover:border-violet-400/50 transition-colors"
+        >
+          + Neuer API-Schlüssel
+        </button>
       </Card>
 
       <AnimatedModal isOpen={pwOpen} onClose={() => setPwOpen(false)} title="Passwort ändern">
@@ -1504,9 +1602,9 @@ function SecurityTab() {
         </div>
       </AnimatedModal>
 
-      <AnimatedModal isOpen={keyOpen && !newKey} onClose={() => setKeyOpen(false)} title="API-Key regenerieren">
+      <AnimatedModal isOpen={keyOpen && !newKey} onClose={() => setKeyOpen(false)} title="Root-API-Key regenerieren">
         <div className="space-y-4">
-          <p className="text-sm text-[#9a8cbf]">Der aktuelle API-Key wird sofort ungültig. Alle Scripts/Tools müssen den neuen Key verwenden.</p>
+          <p className="text-sm text-[#9a8cbf]">Der aktuelle Root-Key wird sofort ungültig. Alle Scripts/Tools müssen den neuen Key verwenden.</p>
           <p className="text-sm font-semibold text-amber-400">Der neue Key wird nur einmalig angezeigt!</p>
           <div className="flex gap-3 pt-2">
             <button onClick={() => setKeyOpen(false)} disabled={generatingKey} className="flex-1 px-4 py-2 rounded-xl border border-[#2a1f42] text-[#9a8cbf] text-sm hover:text-[#f0eeff] disabled:opacity-50 transition-colors">Abbrechen</button>
@@ -1519,13 +1617,78 @@ function SecurityTab() {
 
       <AnimatedModal isOpen={!!newKey} onClose={() => { setNewKey(''); setKeyOpen(false) }} title="">
         <div className="space-y-4">
-          <h3 className="text-lg font-bold text-green-400">✓ Neuer API-Key generiert</h3>
+          <h3 className="text-lg font-bold text-green-400">✓ Neuer Root-API-Key generiert</h3>
           <p className="text-sm text-[#9a8cbf]">Bitte jetzt kopieren – wird nicht erneut angezeigt:</p>
           <div className="bg-[#080612] neon-card rounded-xl p-4 font-mono text-sm text-violet-300 break-all">{newKey}</div>
           <div className="flex items-center gap-2 px-4 py-3 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-300 text-xs">
             <span>⚠</span> Dieser Key wird nicht erneut angezeigt. Jetzt kopieren!
           </div>
           <MovingBorderButton onClick={() => { setNewKey(''); setKeyOpen(false) }} className="w-full">Schließen</MovingBorderButton>
+        </div>
+      </AnimatedModal>
+
+      {/* Neuer benannter API-Schlüssel */}
+      <AnimatedModal isOpen={newNamedKeyOpen} onClose={() => { setNewNamedKeyOpen(false); setNewNamedKeyName(''); setNewNamedKeyDesc('') }} title="Neuer API-Schlüssel">
+        <div className="space-y-4">
+          <div>
+            <label className={labelCls}>Name <span className="text-red-400">*</span></label>
+            <input
+              type="text"
+              value={newNamedKeyName}
+              onChange={(e) => setNewNamedKeyName(e.target.value)}
+              placeholder="z.B. Traefik ACME"
+              className={inputCls}
+              maxLength={100}
+            />
+          </div>
+          <div>
+            <label className={labelCls}>Beschreibung (optional)</label>
+            <input
+              type="text"
+              value={newNamedKeyDesc}
+              onChange={(e) => setNewNamedKeyDesc(e.target.value)}
+              placeholder="z.B. Let's Encrypt via Traefik"
+              className={inputCls}
+              maxLength={500}
+            />
+          </div>
+          <div className="flex gap-3 pt-2">
+            <button
+              onClick={() => { setNewNamedKeyOpen(false); setNewNamedKeyName(''); setNewNamedKeyDesc('') }}
+              disabled={creatingNamedKey}
+              className="flex-1 px-4 py-2 rounded-xl border border-[#2a1f42] text-[#9a8cbf] text-sm hover:text-[#f0eeff] disabled:opacity-50 transition-colors"
+            >
+              Abbrechen
+            </button>
+            <MovingBorderButton onClick={handleCreateNamedKey} disabled={!newNamedKeyName.trim() || creatingNamedKey} className="flex-1">
+              {creatingNamedKey ? <span className="flex items-center justify-center gap-2"><Spinner /> Erstellt …</span> : 'Schlüssel erstellen'}
+            </MovingBorderButton>
+          </div>
+        </div>
+      </AnimatedModal>
+
+      {/* Erstellter Key anzeigen (einmalig) */}
+      <AnimatedModal isOpen={!!createdKey} onClose={() => { setCreatedKey(null); setCopied(false) }} title="">
+        <div className="space-y-4">
+          <h3 className="text-lg font-bold text-green-400">✓ API-Schlüssel erstellt</h3>
+          <div>
+            <div className="text-sm font-medium text-[#f0eeff] mb-1">{createdKey?.name}</div>
+            {createdKey?.description && <div className="text-xs text-[#6b5f8a]">{createdKey.description}</div>}
+          </div>
+          <p className="text-sm text-[#9a8cbf]">Bitte jetzt kopieren – wird nicht erneut angezeigt:</p>
+          <div className="bg-[#080612] neon-card rounded-xl p-4 font-mono text-sm text-violet-300 break-all">
+            {createdKey?.key}
+          </div>
+          <button
+            onClick={handleCopyKey}
+            className="w-full py-2 rounded-xl bg-violet-600/20 border border-violet-500/30 text-sm text-violet-400 hover:text-violet-300 transition-colors"
+          >
+            {copied ? '✓ Kopiert!' : 'Key kopieren'}
+          </button>
+          <div className="flex items-center gap-2 px-4 py-3 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-300 text-xs">
+            <span>⚠</span> Dieser Key wird nicht erneut angezeigt. Jetzt kopieren!
+          </div>
+          <MovingBorderButton onClick={() => { setCreatedKey(null); setCopied(false) }} className="w-full">Schließen</MovingBorderButton>
         </div>
       </AnimatedModal>
     </div>

@@ -181,6 +181,16 @@ func applyMasterState(ctx context.Context, fs *filestore.FileStore, state Master
 		}
 	}
 
+	// NamedAPIKeys
+	if len(state.NamedAPIKeys) > 0 && string(state.NamedAPIKeys) != "null" {
+		var apiKeys []store.NamedAPIKey
+		if err := json.Unmarshal(state.NamedAPIKeys, &apiKeys); err == nil {
+			if err := fs.SetNamedAPIKeys(ctx, apiKeys); err != nil {
+				log.Warn().Err(err).Msg("cluster: apply named api keys failed")
+			}
+		}
+	}
+
 	// Reload-Callbacks triggern
 	if zonesChanged && callbacks.ZoneReloader != nil {
 		go func() {

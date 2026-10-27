@@ -105,6 +105,9 @@ func main() {
 		log.Fatal().Err(err).Msg("failed to initialize auth manager")
 	}
 
+	// Wire named API key store into AuthManager for ValidateAnyKey
+	authManager.SetNamedKeyStore(store)
+
 	if !authManager.IsSetupCompleted() {
 		log.Info().Msg("setup wizard active: http://<host>/setup — default login: admin/admin")
 	}
@@ -216,6 +219,14 @@ func main() {
 		if err := dnsServer.LoadZones(ctx, zoneStore); err != nil {
 			log.Warn().Err(err).Msg("failed to load zones, DNS will not serve authoritative zones")
 		}
+	}
+
+	// Wire ACME challenge reader so _acme-challenge.* TXT queries are answered directly
+	switch s := store.(type) {
+	case *cluster.PropagatingStore:
+		dnsServer.SetACMEChallengeReader(s.FileStore)
+	case *filestore.FileStore:
+		dnsServer.SetACMEChallengeReader(s)
 	}
 
 	// Reload callbacks

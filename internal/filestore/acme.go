@@ -41,6 +41,28 @@ func (s *FileStore) PutACMEChallenge(_ context.Context, fqdn, value string, ttl 
 	return atomicWriteJSON(s.acmePath(), challenges)
 }
 
+// GetACMEChallenge returns the TXT value for a stored, non-expired ACME challenge.
+// fqdn may optionally have a trailing dot (miekg/dns format).
+func (s *FileStore) GetACMEChallenge(_ context.Context, fqdn string) (string, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	fqdn = strings.TrimSuffix(fqdn, ".")
+
+	var challenges []acmeChallenge
+	if err := readJSON(s.acmePath(), &challenges); err != nil {
+		return "", false
+	}
+	for _, c := range challenges {
+		if strings.EqualFold(c.FQDN, fqdn) {
+			if c.ExpiresAt.After(time.Now()) {
+				return c.Value, true
+			}
+		}
+	}
+	return "", false
+}
+
 // DeleteACMEChallenge removes an ACME challenge TXT record.
 func (s *FileStore) DeleteACMEChallenge(_ context.Context, fqdn string) error {
 	s.mu.Lock()

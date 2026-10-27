@@ -18,9 +18,10 @@ const bcryptCost = 12
 // AuthManager holds the auth configuration in memory and synchronizes with the database.
 // It is goroutine-safe and uses RWMutex for read-heavy access.
 type AuthManager struct {
-	mu    sync.RWMutex
-	store store.AuthStore
-	cfg   *store.AuthConfig
+	mu       sync.RWMutex
+	store    store.AuthStore
+	cfg      *store.AuthConfig
+	keyStore NamedAPIKeyStore // nil until SetNamedKeyStore is called
 }
 
 // NewAuthManager loads the auth configuration from the store.
@@ -90,6 +91,28 @@ func (am *AuthManager) ValidatePassword(username, password string) bool {
 	// Password: bcrypt comparison
 	err := bcrypt.CompareHashAndPassword([]byte(cfg.PasswordHash), []byte(password))
 	return usernameMatch && err == nil
+}
+
+// SetNamedKeyStore sets the named API key store for ValidateAnyKey.
+func (am *AuthManager) SetNamedKeyStore(s NamedAPIKeyStore) {
+	am.mu.Lock()
+	am.keyStore = s
+	am.mu.Unlock()
+}
+
+// ValidateAnyKey checks the root API key first, then all named API keys.
+// Used by AuthMiddleware so both root and named keys grant access.
+func (am *AuthManager) ValidateAnyKey(key string) bool {
+	if am.ValidateAPIKey(key) {
+		return true
+	}
+	am.mu.RLock()
+	ks := am.keyStore
+	am.mu.RUnlock()
+	if ks != nil {
+		return ks.ValidateNamedAPIKey(context.Background(), key)
+	}
+	return false
 }
 
 // ValidateAPIKey checks the API key (constant-time, no bcrypt).

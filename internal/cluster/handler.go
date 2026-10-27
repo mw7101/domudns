@@ -134,5 +134,11 @@ func (h *Handler) buildState(ctx context.Context) (*MasterStateResponse, error) 
 		state.TSIGKeys, _ = json.Marshal(tsigKeys)
 	}
 
+	// Named API Keys (including key values for slave-side validation)
+	namedAPIKeys, err := h.store.GetAllNamedAPIKeys(ctx)
+	if err == nil {
+		state.NamedAPIKeys, _ = json.Marshal(namedAPIKeys)
+	}
+
 	return state, nil
 }

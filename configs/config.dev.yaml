@@ -42,7 +42,7 @@ postgres:
 
 acme:
   dns_provider: "internal"
-  challenge_ttl: 60
+  challenge_ttl: 300
 
 blocklist:
   enabled: true

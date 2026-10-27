@@ -116,6 +116,9 @@ func newServerWithOpts(cfg *config.Config, authManager *api.AuthManager, store a
 	if opts.DHCPHandler != nil {
 		router.SetDHCPHandler(opts.DHCPHandler)
 	}
+	// Register named API keys handler
+	apiKeysHandler := api.NewAPIKeysHandler(store)
+	router.SetAPIKeysHandler(apiKeysHandler)
 	var apiHandler http.Handler = router
 	if cfg.System.RateLimit.Enabled {
 		trustProxy := cfg.Caddy.API.TrustProxy

@@ -256,6 +256,25 @@ func (s *PropagatingStore) UpdateBlocklistURLFetch(ctx context.Context, id int, 
 	return nil
 }
 
+// CreateNamedAPIKey creates a named API key and propagates EventAPIKeys to slaves.
+func (s *PropagatingStore) CreateNamedAPIKey(ctx context.Context, name, description string) (*store.NamedAPIKey, error) {
+	key, err := s.FileStore.CreateNamedAPIKey(ctx, name, description)
+	if err != nil {
+		return nil, err
+	}
+	s.pushNamedAPIKeys(ctx)
+	return key, nil
+}
+
+// DeleteNamedAPIKey deletes a named API key and propagates EventAPIKeys to slaves.
+func (s *PropagatingStore) DeleteNamedAPIKey(ctx context.Context, id string) error {
+	if err := s.FileStore.DeleteNamedAPIKey(ctx, id); err != nil {
+		return err
+	}
+	s.pushNamedAPIKeys(ctx)
+	return nil
+}
+
 // PutACMEChallenge delegates to FileStore (no propagation - short-lived).
 func (s *PropagatingStore) PutACMEChallenge(ctx context.Context, fqdn, value string, ttl time.Duration) error {
 	return s.FileStore.PutACMEChallenge(ctx, fqdn, value, ttl)
@@ -307,6 +326,13 @@ func (s *PropagatingStore) pushTSIGKeys(ctx context.Context) {
 	keys, err := s.FileStore.GetTSIGKeys(ctx)
 	if err == nil {
 		s.propagator.PushAsync(EventTSIGKeys, keys)
+	}
+}
+
+func (s *PropagatingStore) pushNamedAPIKeys(ctx context.Context) {
+	keys, err := s.FileStore.GetAllNamedAPIKeys(ctx)
+	if err == nil {
+		s.propagator.PushAsync(EventAPIKeys, keys)
 	}
 }
 

@@ -1,7 +1,9 @@
 package dnsserver
 
 import (
+	"context"
 	"net"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -34,6 +36,8 @@ type Handler struct {
 	axfr *AXFRHandler
 	// splitHorizon determines the view name for requesting clients (nil = disabled).
 	splitHorizon *SplitHorizonResolver
+	// acme serves ACME DNS-01 challenges as TXT records (nil = disabled).
+	acme ACMEChallengeReader
 }
 
 // NewHandler creates a new DNS query handler
@@ -66,6 +70,11 @@ func (h *Handler) SetAXFRHandler(a *AXFRHandler) {
 // SetSplitHorizonResolver sets the split-horizon resolver (nil = disabled).
 func (h *Handler) SetSplitHorizonResolver(r *SplitHorizonResolver) {
 	h.splitHorizon = r
+}
+
+// SetACMEChallengeReader sets the ACME challenge reader (nil = disabled).
+func (h *Handler) SetACMEChallengeReader(r ACMEChallengeReader) {
+	h.acme = r
 }
 
 // UpdateRebindingProtection updates the rebinding protection configuration at runtime.
@@ -153,6 +162,32 @@ func (h *Handler) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 			log.Debug().
 				Str("client", clientIP.String()).
 				Msg("whitelisted IP, bypassing blocklist")
+		}
+	}
+
+	// Phase 2.9: ACME DNS-01 challenges (_acme-challenge.* TXT)
+	// DNS names are case-insensitive (RFC 1035); miekg/dns preserves original case.
+	if h.acme != nil && q.Qtype == dns.TypeTXT && strings.HasPrefix(strings.ToLower(q.Name), "_acme-challenge.") {
+		if txtVal, ok := h.acme.GetACMEChallenge(context.Background(), q.Name); ok {
+			m := new(dns.Msg)
+			m.SetReply(r)
+			m.Authoritative = true
+			m.Answer = append(m.Answer, &dns.TXT{
+				Hdr: dns.RR_Header{
+					Name:   q.Name,
+					Rrtype: dns.TypeTXT,
+					Class:  dns.ClassINET,
+					Ttl:    60,
+				},
+				Txt: []string{txtVal},
+			})
+			if err := w.WriteMsg(m); err != nil {
+				log.Error().Err(err).Msg("failed to write ACME challenge response")
+			}
+			metrics.DNSQueriesTotal.WithLabelValues(qtype, "authoritative").Inc()
+			metrics.DNSQueryDuration.WithLabelValues("authoritative").Observe(time.Since(start).Seconds())
+			h.queryLogger.LogQuery(clientIP.String(), q.Name, qtype, querylog.ResultAuthoritative, "", time.Since(start), dns.RcodeSuccess)
+			return
 		}
 	}
 

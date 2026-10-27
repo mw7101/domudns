@@ -1,90 +1,151 @@
-# Testing Let's Encrypt
+# Let's Encrypt DNS-01 with DomU DNS
+
+DomU DNS can answer `_acme-challenge.*` TXT queries directly from its internal challenge store.
+Any ACME client that speaks DNS-01 will receive the correct TXT record when it queries your DNS server.
 
 ## Prerequisites
 
-1. **Public domain** that points to your server
-2. **DNS server** from domudns is authoritative for the domain (e.g. `int.example.com`)
-3. The domain must point to your NS at the domain registrar
+1. Public domain whose NS records point to your DomU DNS instance
+2. DomU DNS is reachable on port 53 (TCP + UDP) from the public internet **or** you use split-horizon so Let's Encrypt queries the public server
+3. A **Named API Key** from the DomU DNS dashboard (Settings → Sicherheit → API-Schlüssel → + Neuer API-Schlüssel)
 
-## Use staging (recommended for testing)
+---
 
-Let's Encrypt staging has higher rate limits and does not issue trusted certificates — ideal for testing.
+## Option 1: acme.sh (recommended for Linux/Proxmox)
 
-## Option 1: Certbot with manual hooks
-
-### Step 1: Make hooks executable
+### Install acme.sh
 
 ```bash
-chmod +x scripts/certbot-dns-hook.sh scripts/certbot-dns-hook-cleanup.sh
+curl https://get.acme.sh | sh
 ```
 
-### Step 2: Install Certbot
+### Copy the hook script
 
 ```bash
-sudo apt install certbot
+cp /path/to/domudns/scripts/dns_domudns.sh ~/.acme.sh/dnsapi/dns_domudns.sh
+chmod +x ~/.acme.sh/dnsapi/dns_domudns.sh
 ```
 
-### Step 3: Request staging certificate
+### Issue certificate
 
 ```bash
-export DOMUDNS_API_URL="http://127.0.0.1:80"   # or your API URL
-export DOMUDNS_API_KEY="your-api-key-from-setup-wizard"
+export DOMUDNS_URL=http://192.0.2.151
+export DOMUDNS_API_KEY=<named api key from dashboard>
 
-sudo certbot certonly \
-  --manual \
-  --preferred-challenges dns \
-  --manual-auth-hook "$(pwd)/scripts/certbot-dns-hook.sh" \
-  --manual-cleanup-hook "$(pwd)/scripts/certbot-dns-hook-cleanup.sh" \
+acme.sh --issue --dns dns_domudns -d example.com -d '*.example.com'
+```
+
+### Proxmox ACME (Datacenter → ACME → DNS Plugin)
+
+| Field | Value |
+|-------|-------|
+| Plugin ID | `domudns` |
+| API data | `DOMUDNS_URL=http://192.0.2.151` |
+| | `DOMUDNS_API_KEY=<named api key>` |
+
+---
+
+## Option 2: Certbot DNS Plugin
+
+### Install
+
+```bash
+pip install certbot certbot-dns-domudns
+# or from local source:
+pip install /path/to/domudns/certbot-dns-domudns/
+```
+
+### Credentials file `/etc/letsencrypt/domudns.ini`
+
+```ini
+certbot_dns_domudns:dns_domudns_url = http://192.0.2.151
+certbot_dns_domudns:dns_domudns_api_key = <named api key from dashboard>
+```
+
+```bash
+chmod 600 /etc/letsencrypt/domudns.ini
+```
+
+### Issue certificate (staging)
+
+```bash
+certbot certonly \
+  --authenticator dns-domudns \
+  --dns-domudns-credentials /etc/letsencrypt/domudns.ini \
   --server https://acme-staging-v02.api.letsencrypt.org/directory \
-  -d your.domain.com
+  -d example.com -d '*.example.com'
 ```
 
-### Step 4: Verify DNS is working
-
-Check the TXT record before Certbot runs (after the auth hook, before validation):
+### Issue certificate (production)
 
 ```bash
-# Must query your DNS server (port 53)
-dig @127.0.0.1 _acme-challenge.your.domain.com TXT
+certbot certonly \
+  --authenticator dns-domudns \
+  --dns-domudns-credentials /etc/letsencrypt/domudns.ini \
+  -d example.com -d '*.example.com'
 ```
 
-## Option 2: Test the API manually
+---
 
-### Step 1: Create challenge
+## Option 3: Traefik httpreq provider
+
+Traefik's `httpreq` DNS provider uses Basic Auth — the named API key is used as the password.
+
+### Traefik static config
+
+```yaml
+certificatesResolvers:
+  letsencrypt:
+    acme:
+      email: admin@example.com
+      storage: /acme/acme.json
+      dnsChallenge:
+        provider: httpreq
+```
+
+### Environment variables
 
 ```bash
-curl -X POST http://127.0.0.1/api/acme/dns-01/present \
-  -H "Authorization: Bearer YOUR_API_KEY" \
+HTTPREQ_ENDPOINT=http://192.0.2.151/api/acme/httpreq
+HTTPREQ_USERNAME=traefik           # any string
+HTTPREQ_PASSWORD=<named api key>   # from DomU DNS dashboard
+```
+
+---
+
+## Option 4: Manual API test
+
+Verify the full flow before using an ACME client:
+
+```bash
+API=http://192.0.2.151
+KEY=<named api key>
+
+# 1. Store challenge
+curl -X POST $API/api/acme/dns-01/present \
+  -H "Authorization: Bearer $KEY" \
   -H "Content-Type: application/json" \
-  -d '{"domain": "int.example.com", "txt_value": "test-validation-123"}'
-```
+  -d '{"domain":"example.com","txt_value":"test-token-123"}'
 
-### Step 2: Verify DNS query
+# 2. Query DNS — must return "test-token-123"
+dig @192.0.2.151 _acme-challenge.example.com TXT
 
-```bash
-dig @127.0.0.1 _acme-challenge.int.example.com TXT
-```
-
-Expected: TXT with `test-validation-123`
-
-### Step 3: Remove challenge
-
-```bash
-curl -X POST http://127.0.0.1/api/acme/dns-01/cleanup \
-  -H "Authorization: Bearer YOUR_API_KEY" \
+# 3. Remove challenge
+curl -X POST $API/api/acme/dns-01/cleanup \
+  -H "Authorization: Bearer $KEY" \
   -H "Content-Type: application/json" \
-  -d '{"domain": "int.example.com"}'
+  -d '{"domain":"example.com"}'
 ```
 
-## Common Errors
+---
+
+## Troubleshooting
 
 | Problem | Solution |
 |---------|----------|
-| "Domain does not resolve" | NS records for the domain must point to your DNS server |
-| "Connection refused" | domudns is not running or HTTP server not reachable (port 80/443) |
-| "Invalid API key" | Use API key from setup wizard or `/var/lib/domudns/data/auth.json` |
-| Rate limit | Use staging server: `--server https://acme-staging-v02.api.letsencrypt.org/directory` |
-
-## Production
-
-For real certificates, omit `--server` (uses production) and make sure the domain is correctly configured.
+| `dig` returns NXDOMAIN | Challenge not stored yet, or TTL expired (default 60s) |
+| "Invalid API key" | Use a Named API Key from Settings → Sicherheit → API-Schlüssel |
+| "Connection refused" | DomU DNS HTTP server not reachable on the configured port |
+| "Domain does not resolve" | NS records for the domain must point to your DomU DNS server |
+| Rate limit exceeded | Use staging: `--server https://acme-staging-v02.api.letsencrypt.org/directory` |
+| Traefik: 401 Unauthorized | Check `HTTPREQ_PASSWORD` matches the Named API Key exactly |

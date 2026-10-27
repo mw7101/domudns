@@ -108,6 +108,8 @@ func (h *ReceiverHandler) applyEvent(ctx context.Context, req SyncRequest) error
 		return h.applyBlocklistPatterns(ctx, req.Data)
 	case EventTSIGKeys:
 		return h.applyTSIGKeys(ctx, req.Data)
+	case EventAPIKeys:
+		return h.applyAPIKeys(ctx, req.Data)
 	default:
 		log.Warn().Str("event", string(req.Type)).Msg("cluster: unknown event type, ignoring")
 		return nil
@@ -283,6 +285,17 @@ func (h *ReceiverHandler) applyTSIGKeys(ctx context.Context, data json.RawMessag
 				log.Warn().Err(err).Msg("cluster: ddns key reload failed")
 			}
 		}()
+	}
+	return nil
+}
+
+func (h *ReceiverHandler) applyAPIKeys(ctx context.Context, data json.RawMessage) error {
+	var keys []store.NamedAPIKey
+	if err := json.Unmarshal(data, &keys); err != nil {
+		return fmt.Errorf("unmarshal api keys: %w", err)
+	}
+	if err := h.store.SetNamedAPIKeys(ctx, keys); err != nil {
+		return fmt.Errorf("set api keys: %w", err)
 	}
 	return nil
 }

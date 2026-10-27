@@ -139,7 +139,17 @@ func AuthMiddleware(auth *AuthManager, sessions *SessionManager, next http.Handl
 		// 2. Check bearer token (API/curl)
 		if authHeader := r.Header.Get("Authorization"); strings.HasPrefix(authHeader, "Bearer ") {
 			key := strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
-			if auth.ValidateAPIKey(key) {
+			if auth.ValidateAnyKey(key) {
+				next.ServeHTTP(w, r)
+				return
+			}
+			writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "Unauthorized")
+			return
+		}
+
+		// 3. Check basic auth (password = named API key, for Traefik httpreq provider)
+		if _, password, ok := r.BasicAuth(); ok {
+			if auth.ValidateAnyKey(password) {
 				next.ServeHTTP(w, r)
 				return
 			}

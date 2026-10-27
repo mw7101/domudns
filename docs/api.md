@@ -2,21 +2,60 @@
 
 Base path: `/api`
 
-All endpoints except `/api/health` require authentication via `Authorization: Bearer <API_KEY>`.
+All endpoints except `/api/health` require authentication via one of:
+- `Authorization: Bearer <key>` — root API key or named API key
+- `Authorization: Basic base64(user:key)` — named API key as password (for Traefik httpreq)
+- Session cookie after `/api/login`
 
 ## Authentication
 
-The API key is set via the setup wizard (`/setup`) and stored in `auth.json`.
+### Root API Key
+
+The root key is set via the setup wizard (`/setup`) and stored in `auth.json`. It grants full access.
 
 **API access (curl / scripts):**
 ```bash
-curl -H "Authorization: Bearer <64-hex-character-API-key>" \
+curl -H "Authorization: Bearer <64-hex-character-key>" \
   http://192.0.2.151/api/zones
 ```
 
-**Browser access:** `/login` → username + password → session cookie is sent automatically.
+**Retrieve / regenerate root key:** Dashboard → Settings → Sicherheit → Root-API-Key generieren …
 
-**Retrieve API key:** Dashboard → Settings → Security → show / regenerate API key.
+### Named API Keys
+
+Dedicated keys per external tool (Traefik, Certbot, acme.sh, Proxmox). Each key can be revoked individually without affecting other tools.
+
+**Create:**
+```bash
+curl -X POST http://192.0.2.151/api/auth/api-keys \
+  -H "Authorization: Bearer ROOT_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Traefik ACME","description":"Let'\''s Encrypt via Traefik"}'
+# → response contains "key" field (shown once, never returned again)
+```
+
+**List (without key values):**
+```bash
+GET /api/auth/api-keys
+```
+
+**Delete:**
+```bash
+DELETE /api/auth/api-keys/{id}
+```
+
+Named keys are accepted everywhere root keys are — Bearer token or Basic Auth password:
+```bash
+# Bearer (curl, acme.sh, certbot plugin)
+curl -H "Authorization: Bearer NAMED_KEY" ...
+
+# Basic Auth (Traefik httpreq provider)
+curl -u "anyuser:NAMED_KEY" ...
+```
+
+**Manage in Dashboard:** Settings → Sicherheit → API-Schlüssel
+
+**Browser access:** `/login` → username + password → session cookie is sent automatically.
 
 ## Health Check
 

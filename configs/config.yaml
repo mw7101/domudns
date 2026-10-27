@@ -114,7 +114,7 @@ acme:
   # Polling interval for checking DNS propagation
   polling_interval: 2  # seconds
   # TTL for ACME challenge TXT records
-  challenge_ttl: 60  # seconds
+  challenge_ttl: 300  # seconds (5 min, Let's Encrypt may take up to 60–90s to verify)
 
 # Blocklist (Ad/Malware blocking, Whitelist)
 blocklist:

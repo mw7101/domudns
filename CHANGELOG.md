@@ -2,7 +2,25 @@
 
 All notable changes to DomU DNS will be documented in this file.
 
-## [v.1.1]
+## [v0.1.2]
+
+### 2026-03-08
+
+#### Added
+- **Named API Keys** (`internal/store/apikeys.go`, `internal/filestore/apikeys.go`, `internal/caddy/api/apikeys_handler.go`): Dedicated API keys per external tool (Traefik, Certbot, acme.sh, Proxmox). Keys are created/deleted via `GET/POST/DELETE /api/auth/api-keys`. Each key is shown only once on creation. Root key and named keys are interchangeable for Bearer and Basic Auth.
+- **Basic Auth support** (`internal/caddy/api/middleware.go`): `AuthMiddleware` now accepts `Authorization: Basic` with the named API key as password — required for Traefik's `httpreq` DNS provider.
+- **Named API Key cluster sync** (`internal/cluster/`): Master propagates key list (including raw key values) to slaves via `EventAPIKeys`. Slaves can validate named keys locally without round-trip to master.
+- **ACME DNS-01 TXT serving** (`internal/dnsserver/acme.go`, `internal/dnsserver/handler.go` Phase 2.9, `internal/filestore/acme.go`): `_acme-challenge.*` TXT queries are now answered directly from `acme_challenges.json`. Previously NXDOMAIN was returned even when a challenge was stored.
+- **Traefik httpreq endpoints** (`internal/caddy/api/acme.go`): `POST /api/acme/httpreq/present` and `POST /api/acme/httpreq/cleanup` speak the Traefik `httpreq` DNS provider protocol (FQDN with trailing dot, `value` field).
+- **acme.sh / Proxmox script** (`scripts/dns_domudns.sh`): Drop-in DNS hook for acme.sh and Proxmox ACME datacenter plugin. Uses `DOMUDNS_URL` + `DOMUDNS_API_KEY` env vars.
+- **Certbot DNS plugin** (`certbot-dns-domudns/`): Standalone Python certbot plugin (`certbot-dns-domudns`) with entry point `dns-domudns`. Uses INI credentials file (`dns_domudns_url`, `dns_domudns_api_key`).
+
+#### Tests
+- `TestACMEChallengeHandlerHit`: TXT query for stored, non-expired challenge → RcodeSuccess + TXT answer.
+- `TestACMEChallengeHandlerMiss`: TXT query for unknown challenge → ACME phase skipped, pipeline continues.
+- `TestACMEChallengeHandlerWrongQtype`: A query on `_acme-challenge.*` → phase 2.9 not triggered.
+
+## [v0.1.1]
 
 ### 2026-03-07
 

@@ -150,6 +150,11 @@ func (s *Server) SetAXFRHandler(a *AXFRHandler) {
 	s.handler.SetAXFRHandler(a)
 }
 
+// SetACMEChallengeReader sets the ACME challenge reader (nil = disabled).
+func (s *Server) SetACMEChallengeReader(r ACMEChallengeReader) {
+	s.handler.SetACMEChallengeReader(r)
+}
+
 // UpdateAXFRAllowedIPs replaces the allowed AXFR client IPs/CIDRs at runtime.
 func (s *Server) UpdateAXFRAllowedIPs(ips []string) error {
 	if s.handler.axfr == nil {
