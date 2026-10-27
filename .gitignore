@@ -1,0 +1,24 @@
+tmp/*.*
+build/*.*
+build/*
+coverage.out
+*.prof
+*.test
+*.log
+*.log.*
+*.log.*.*
+*.log.*.*.*
+*.log.*.*.*.*
+*.log.*.*.*.*.*
+
+# Next.js Dashboard (Build-Artefakte — werden vom CI/CD generiert)
+dashboard/node_modules/
+dashboard/.next/
+dashboard/out/
+
+# Web-Assets (werden von build-dashboard generiert, nicht committen)
+internal/caddy/web/*
+
+# MCP-Konfiguration (lokale Entwicklungstools, nicht ins Repo)
+.mcp.json
+
