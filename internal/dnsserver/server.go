@@ -95,21 +95,21 @@ func New(cfg Config) *Server {
 
 	// UDP server
 	s.udpServer = &dns.Server{
-		Addr:            cfg.Listen,
-		Net:             "udp",
-		Handler:         handler,
-		UDPSize:         cfg.UDPSize,
-		MsgAcceptFunc:   ddnsMsgAcceptFunc,
+		Addr:          cfg.Listen,
+		Net:           "udp",
+		Handler:       handler,
+		UDPSize:       cfg.UDPSize,
+		MsgAcceptFunc: ddnsMsgAcceptFunc,
 	}
 
 	// TCP server
 	s.tcpServer = &dns.Server{
-		Addr:            cfg.Listen,
-		Net:             "tcp",
-		Handler:         handler,
-		ReadTimeout:     cfg.TCPTimeout,
-		WriteTimeout:    cfg.TCPTimeout,
-		MsgAcceptFunc:   ddnsMsgAcceptFunc,
+		Addr:          cfg.Listen,
+		Net:           "tcp",
+		Handler:       handler,
+		ReadTimeout:   cfg.TCPTimeout,
+		WriteTimeout:  cfg.TCPTimeout,
+		MsgAcceptFunc: ddnsMsgAcceptFunc,
 	}
 
 	// DoT server (DNS over TLS, RFC 7858) — only when enabled + certificate present
