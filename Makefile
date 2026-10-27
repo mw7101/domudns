@@ -16,6 +16,15 @@ GOTEST=$(GOCMD) test
 GOGET=$(GOCMD) get
 GOMOD=$(GOCMD) mod
 
+# Linter: feste Version statt @latest — @latest löste über den v1-Modulpfad auf
+# (v2 liegt unter .../golangci-lint/v2), und v1.64.8 pinnt ein x/tools aus der
+# Go-1.23-Ära: damit bricht jeder Lauf mit "could not load export data: …
+# version 4 is greater than maximum supported version 2" ab, sobald die
+# Toolchain neuer ist als der Linter. Version hier mit der Go-Toolchain
+# hochziehen.
+GOLANGCI_LINT_VERSION=v2.15.0
+GOLANGCI_LINT=$(shell go env GOPATH)/bin/golangci-lint
+
 # Directories
 BUILD_DIR=build
 CMD_DIR=cmd
@@ -103,9 +112,10 @@ test-security:
 # Lint code
 lint:
 	@echo "Running linters..."
-	@which golangci-lint > /dev/null || (echo "Installing golangci-lint..." && \
-		go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest)
-	PATH="$$(go env GOPATH)/bin:$$PATH" golangci-lint run --timeout=5m
+	@$(GOLANGCI_LINT) version 2>/dev/null | grep -qF "version $(GOLANGCI_LINT_VERSION:v%=%) " || \
+		(echo "Installing golangci-lint $(GOLANGCI_LINT_VERSION)..." && \
+		 go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION))
+	$(GOLANGCI_LINT) run --timeout=5m
 
 # Format code (goimports from GOPATH/bin if not in PATH)
 fmt:

@@ -5,6 +5,7 @@ import (
 	"sync/atomic"
 
 	"github.com/mw7101/domudns/internal/querylog"
+	"github.com/mw7101/domudns/pkg/metrics"
 	"github.com/miekg/dns"
 	"github.com/rs/zerolog/log"
 	"golang.org/x/sync/singleflight"
@@ -39,11 +40,19 @@ type Handler struct {
 	axfr *AXFRHandler
 	// splitHorizon determines the view name for requesting clients (nil = disabled).
 	splitHorizon *SplitHorizonResolver
+	// clientGroups maps client IPs to active blocklist categories (nil = use DefaultCategories).
+	clientGroups *ClientGroupResolver
 	// acme serves ACME DNS-01 challenges as TXT records (nil = disabled).
 	acme ACMEChallengeReader
 	// sfGroup deduplicates concurrent upstream requests for the same domain+type
 	// (thundering-herd protection on cache misses).
 	sfGroup singleflight.Group
+	// rateLimiter applies per-client-IP query rate limiting (nil = disabled).
+	// Stored atomically so live config reloads swap it without a data race.
+	rateLimiter atomic.Pointer[QueryRateLimiter]
+	// acl restricts which client networks may query at all (nil = allow all).
+	// Stored atomically so live config reloads swap it without a data race.
+	acl atomic.Pointer[networkACL]
 }
 
 // NewHandler creates a new DNS query handler
@@ -78,9 +87,34 @@ func (h *Handler) SetSplitHorizonResolver(r *SplitHorizonResolver) {
 	h.splitHorizon = r
 }
 
+// SetClientGroupResolver sets the client group resolver.
+func (h *Handler) SetClientGroupResolver(r *ClientGroupResolver) {
+	h.clientGroups = r
+}
+
 // SetACMEChallengeReader sets the ACME challenge reader (nil = disabled).
 func (h *Handler) SetACMEChallengeReader(r ACMEChallengeReader) {
 	h.acme = r
+}
+
+// SetAccessControl replaces the client-network allowlist. Passing nil or an
+// empty slice allows every client (default). Safe to call concurrently with
+// ServeDNS.
+func (h *Handler) SetAccessControl(allowed []*net.IPNet) {
+	if len(allowed) == 0 {
+		h.acl.Store(nil)
+		return
+	}
+	h.acl.Store(&networkACL{nets: allowed})
+}
+
+// SetRateLimiter installs a new per-client rate limiter, stopping the previous
+// one. Passing nil disables rate limiting. Safe to call concurrently with
+// ServeDNS and idempotently with the same value.
+func (h *Handler) SetRateLimiter(l *QueryRateLimiter) {
+	if old := h.rateLimiter.Swap(l); old != nil && old != l {
+		old.Stop()
+	}
 }
 
 // UpdateRebindingProtection updates the rebinding protection configuration at runtime.
@@ -108,23 +142,54 @@ func (h *Handler) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 	}
 
 	q := r.Question[0]
+	clientIP := extractClientIP(w.RemoteAddr().String())
+
+	ctx := &queryContext{
+		w:        w,
+		req:      r,
+		clientIP: clientIP,
+		question: q,
+		handler:  h,
+	}
+
+	// ACME DNS-01 challenges must be resolvable by the certificate authority's
+	// public resolvers, whose IPs are neither known in advance nor static.
+	// Serve an *active* challenge before access control; acmePhase is a no-op
+	// unless a matching, non-expired challenge is stored, so the ACL still
+	// applies to every other query (including unknown _acme-challenge names).
+	// This keeps the publicly reachable surface to active challenges only.
+	if result := h.acmePhase(ctx); result.done {
+		return
+	}
+
+	// Client-network access control (dnsserver.allowed_networks). Empty = allow all.
+	if acl := h.acl.Load(); !acl.Allows(clientIP) {
+		metrics.DNSACLDroppedTotal.Inc()
+		log.Debug().
+			Str("client", clientIP.String()).
+			Msg("DNS query refused (client not in allowed_networks)")
+		h.respondError(w, r, dns.RcodeRefused)
+		return
+	}
+
+	// Per-client-IP rate limiting (system.rate_limit.dns_queries). Checked before
+	// the ANY guard so amplification-style floods are throttled too.
+	if lim := h.rateLimiter.Load(); lim != nil && !lim.Allow(clientIP) {
+		metrics.DNSRateLimitedTotal.Inc()
+		log.Debug().
+			Str("client", clientIP.String()).
+			Msg("DNS query refused (rate limit exceeded)")
+		h.respondError(w, r, dns.RcodeRefused)
+		return
+	}
 
 	// Block ANY queries to prevent DNS amplification attacks (RFC 8482)
 	if q.Qtype == dns.TypeANY {
-		clientIP := extractClientIP(w.RemoteAddr().String())
 		log.Debug().
 			Str("client", clientIP.String()).
 			Msg("refused ANY query (amplification protection)")
 		h.respondError(w, r, dns.RcodeRefused)
 		return
-	}
-
-	ctx := &queryContext{
-		w:        w,
-		req:      r,
-		clientIP: extractClientIP(w.RemoteAddr().String()),
-		question: q,
-		handler:  h,
 	}
 
 	// DDNS and AXFR are handled first (before the standard query debug log).
@@ -141,9 +206,10 @@ func (h *Handler) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 		Str("client", ctx.clientIP.String()).
 		Msg("DNS query")
 
+	// NOTE: acmePhase is intentionally NOT part of this list — it runs earlier,
+	// before access control and rate limiting (see above).
 	phases := []pipelinePhase{
 		h.blocklistPhase,
-		h.acmePhase,
 		h.zonePhase,
 		h.cachePhase,
 		h.forwardPhase,
@@ -169,18 +235,10 @@ func (h *Handler) respondError(w dns.ResponseWriter, r *dns.Msg, rcode int) {
 	}
 }
 
-// respondBlocked sends a blocked response.
+// buildBlockedResponse creates a blocked response message without writing it.
 // Mode is set via UpdateBlockMode():
 //   - "nxdomain": return NXDOMAIN — browser aborts immediately, no TLS timeout
 //   - "zero_ip" (default): return 0.0.0.0 (A) or :: (AAAA)
-func (h *Handler) respondBlocked(w dns.ResponseWriter, r *dns.Msg, qtype uint16) {
-	m := h.buildBlockedResponse(r, qtype)
-	if err := w.WriteMsg(m); err != nil {
-		log.Error().Err(err).Msg("failed to write blocked response")
-	}
-}
-
-// buildBlockedResponse creates a blocked response message without writing it.
 func (h *Handler) buildBlockedResponse(r *dns.Msg, qtype uint16) *dns.Msg {
 	mode, _ := h.blockMode.Load().(string)
 	if mode == "nxdomain" {

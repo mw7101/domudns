@@ -11,7 +11,7 @@ This guide describes the deployment of DomU DNS on a Raspberry Pi 3B or similar 
 
 ### Software
 - **Operating system:** Debian Bookworm/Trixie or Raspbian
-- **Go:** Version 1.24+ (only for local builds)
+- **Go:** Version 1.27.3+ (only for local builds) — `go.mod` requires that patch level on purpose, so that nobody builds with a standard library that still carries known CVEs: on an older patch level Go either fetches 1.27.3 for you (`GOTOOLCHAIN=auto`) or refuses with a clear message. The CI and the Docker build pin `golang:1.27.3-alpine`.
 
 > **No external database backend required.** The DNS stack stores all data as local JSON files under `/var/lib/domudns/data/`.
 
@@ -26,7 +26,7 @@ This guide describes the deployment of DomU DNS on a Raspberry Pi 3B or similar 
 **Standalone is the default case** and is described in this guide. For multi-node operation: [docs/clustering.md](clustering.md).
 
 ### Build Machine
-- **Local:** macOS, Linux, or Windows with Go 1.24+
+- **Local:** macOS, Linux, or Windows with Go 1.27.3+
 - **Cross-compilation:** Works out of the box (GOARCH=arm GOARM=7)
 
 ## Quick Start (Local Build)
@@ -104,6 +104,11 @@ dnsserver:
     negative_ttl: 300
   udp_size: 4096
   tcp_timeout: "5s"
+  # Access control (optional): only these client networks may query. Empty = all clients.
+  # allowed_networks:
+  #   - "192.168.0.0/16"
+  #   - "127.0.0.1"
+  #   - "::1"
   # Conditional forwarding (optional): route specific domains to specific DNS servers
   # conditional_forwards:
   #   - domain: "fritz.box"
@@ -133,7 +138,10 @@ system:
     listen: "0.0.0.0:9090"
   rate_limit:
     enabled: true
-    api_requests: 100
+    dns_queries: 1000    # sustained DNS queries per minute per client IP
+    api_requests: 100    # sustained HTTP API requests per minute per client IP
+    # exempt_networks:   # CIDRs/IPs that bypass DNS rate limiting (e.g. the router)
+    #   - "192.0.2.1"
   # Query log: record DNS requests (in-memory + optional SQLite)
   query_log:
     enabled: true

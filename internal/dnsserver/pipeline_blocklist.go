@@ -3,6 +3,7 @@ package dnsserver
 import (
 	"time"
 
+	idns "github.com/mw7101/domudns/internal/dns"
 	"github.com/mw7101/domudns/internal/querylog"
 	"github.com/mw7101/domudns/pkg/metrics"
 	"github.com/miekg/dns"
@@ -24,8 +25,14 @@ func (h *Handler) blocklistPhase(ctx *queryContext) pipelineResult {
 		return pipelineResult{}
 	}
 
-	// Check if domain is blocked.
-	if !h.blocklist.IsBlocked(ctx.question.Name) {
+	// Determine active categories for this client.
+	cats := idns.DefaultCategories()
+	if h.clientGroups != nil {
+		cats = h.clientGroups.GetCategories(ctx.clientIP)
+	}
+
+	// Check if domain is blocked for the client's active categories.
+	if !h.blocklist.IsBlocked(ctx.question.Name, cats) {
 		return pipelineResult{}
 	}
 

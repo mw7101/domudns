@@ -10,10 +10,11 @@ import (
 
 func TestHealthHandler_ServeHTTP(t *testing.T) {
 	tests := []struct {
-		name       string
-		dbCheck    func(context.Context) error
-		wantStatus int
-		wantBody   string
+		name         string
+		dbCheck      func(context.Context) error
+		clusterCheck func() bool
+		wantStatus   int
+		wantBody     string
 	}{
 		{
 			name:       "healthy when db ok",
@@ -27,10 +28,27 @@ func TestHealthHandler_ServeHTTP(t *testing.T) {
 			wantStatus: http.StatusOK,
 			wantBody:   `"status":"degraded"`,
 		},
+		{
+			name:         "degraded when cluster check fails",
+			dbCheck:      func(ctx context.Context) error { return nil },
+			clusterCheck: func() bool { return false },
+			wantStatus:   http.StatusOK,
+			wantBody:     `"status":"degraded"`,
+		},
+		{
+			name:         "ok when cluster check passes",
+			dbCheck:      func(ctx context.Context) error { return nil },
+			clusterCheck: func() bool { return true },
+			wantStatus:   http.StatusOK,
+			wantBody:     `"status":"ok"`,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			h := NewHealthHandler(tt.dbCheck)
+			if tt.clusterCheck != nil {
+				h.SetClusterCheck(tt.clusterCheck)
+			}
 			req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
 			w := httptest.NewRecorder()
 			h.ServeHTTP(w, req)

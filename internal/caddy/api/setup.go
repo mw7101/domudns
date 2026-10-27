@@ -5,6 +5,8 @@ import (
 	"html/template"
 	"net/http"
 	"strings"
+
+	"github.com/rs/zerolog/log"
 )
 
 var setupTmpl = template.Must(template.New("setup").Parse(`<!DOCTYPE html>
@@ -205,84 +207,120 @@ func (h *SetupHandler) handleComplete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var username, password, password2 string
-	var generateAPIKey bool
+	req, ok := parseSetupCompleteRequest(w, r)
+	if !ok {
+		return
+	}
+	if !validateSetupPassword(w, r, req.password, req.password2) {
+		return
+	}
 
+	newAPIKey, ok := h.finishSetup(w, r, req.username, req.password, req.generateAPIKey)
+	if !ok {
+		return
+	}
+
+	respondSetupComplete(w, r, newAPIKey)
+}
+
+// setupCompleteRequest is the parsed body of POST /api/setup/complete.
+type setupCompleteRequest struct {
+	username       string
+	password       string
+	password2      string // HTML form only — JSON has no confirmation field
+	generateAPIKey bool
+}
+
+// parseSetupCompleteRequest extracts the setup form from a JSON or HTML
+// form body, defaulting username to "admin". Writes the error response
+// itself and reports ok=false on a malformed request.
+func parseSetupCompleteRequest(w http.ResponseWriter, r *http.Request) (setupCompleteRequest, bool) {
+	var req setupCompleteRequest
 	ct := r.Header.Get("Content-Type")
 	if strings.Contains(ct, "application/json") {
-		var req struct {
+		var body struct {
 			Username       string `json:"username"`
 			Password       string `json:"password"`
 			GenerateAPIKey bool   `json:"generate_api_key"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			writeError(w, http.StatusBadRequest, "INVALID_JSON", "Ungültige JSON-Anfrage")
-			return
+			return setupCompleteRequest{}, false
 		}
-		username = req.Username
-		password = req.Password
-		generateAPIKey = req.GenerateAPIKey
+		req.username, req.password, req.generateAPIKey = body.Username, body.Password, body.GenerateAPIKey
 	} else {
 		if err := r.ParseForm(); err != nil {
 			http.Error(w, "Ungültige Anfrage", http.StatusBadRequest)
-			return
+			return setupCompleteRequest{}, false
 		}
-		username = r.FormValue("username")
-		password = r.FormValue("password")
-		password2 = r.FormValue("password2")
-		generateAPIKey = r.FormValue("generate_api_key") == "1"
+		req.username = r.FormValue("username")
+		req.password = r.FormValue("password")
+		req.password2 = r.FormValue("password2")
+		req.generateAPIKey = r.FormValue("generate_api_key") == "1"
 	}
+	if req.username == "" {
+		req.username = "admin"
+	}
+	return req, true
+}
 
-	// Validierung
-	if username == "" {
-		username = "admin"
-	}
+// validateSetupPassword checks password length and (HTML form only)
+// confirmation match, writing the JSON or HTML-page error response itself.
+func validateSetupPassword(w http.ResponseWriter, r *http.Request, password, password2 string) bool {
 	if len(password) < 8 {
 		if isJSONRequest(r) {
 			writeError(w, http.StatusBadRequest, "PASSWORD_TOO_SHORT", "Passwort muss mindestens 8 Zeichen lang sein")
-			return
+			return false
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_ = setupTmpl.Execute(w, setupPageData{Error: "Passwort muss mindestens 8 Zeichen lang sein."})
-		return
+		return false
 	}
 	if password2 != "" && password != password2 {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_ = setupTmpl.Execute(w, setupPageData{Error: "Passwörter stimmen nicht überein."})
-		return
+		return false
 	}
+	return true
+}
 
-	// Passwort setzen
+// finishSetup sets the password, optionally generates an API key, and marks
+// setup completed. Writes the error response itself and reports ok=false on
+// failure; a failed API key generation is not fatal (newAPIKey stays "").
+func (h *SetupHandler) finishSetup(w http.ResponseWriter, r *http.Request, username, password string, generateAPIKey bool) (string, bool) {
 	if err := h.auth.UpdatePassword(r.Context(), username, password); err != nil {
 		if isJSONRequest(r) {
 			writeError(w, http.StatusInternalServerError, "UPDATE_FAILED", "Passwort konnte nicht gesetzt werden")
-			return
+			return "", false
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_ = setupTmpl.Execute(w, setupPageData{Error: "Fehler beim Setzen des Passworts."})
-		return
+		return "", false
 	}
 
-	// API-Key generieren (optional)
 	var newAPIKey string
 	if generateAPIKey {
-		key, err := h.auth.RegenerateAPIKey(r.Context())
-		if err == nil {
+		if key, err := h.auth.RegenerateAPIKey(r.Context()); err == nil {
 			newAPIKey = key
 		}
 	}
 
-	// Setup abschließen
 	if err := h.auth.MarkSetupCompleted(r.Context()); err != nil {
 		if isJSONRequest(r) {
 			writeError(w, http.StatusInternalServerError, "SETUP_FAILED", "Setup konnte nicht abgeschlossen werden")
-			return
+			return "", false
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_ = setupTmpl.Execute(w, setupPageData{Error: "Fehler beim Abschließen des Setups."})
-		return
+		return "", false
 	}
+	return newAPIKey, true
+}
 
+// respondSetupComplete writes the final "setup done" response: JSON
+// (including the API key, if one was generated) for the dashboard, or the
+// HTML flow (API-key success page, or straight to /login).
+func respondSetupComplete(w http.ResponseWriter, r *http.Request, newAPIKey string) {
 	if isJSONRequest(r) {
 		resp := map[string]interface{}{
 			"message": "Setup abgeschlossen",
@@ -297,7 +335,9 @@ func (h *SetupHandler) handleComplete(w http.ResponseWriter, r *http.Request) {
 	// HTML-Formular: Bei API-Key → kleine Erfolgsseite, sonst direkt zur Login-Seite
 	if newAPIKey != "" {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		apiKeySuccessTmpl.Execute(w, map[string]string{"APIKey": newAPIKey})
+		if err := apiKeySuccessTmpl.Execute(w, map[string]string{"APIKey": newAPIKey}); err != nil {
+			log.Warn().Err(err).Msg("failed to render API key success page")
+		}
 		return
 	}
 	http.Redirect(w, r, "/login", http.StatusSeeOther)

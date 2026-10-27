@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { Topbar } from '@/components/layout/Topbar'
 import { ddns, dhcpLeaseSync, type TSIGKey, type TSIGKeyCreateResponse, type DDNSStatus, type DHCPLease, type DHCPSyncStatus } from '@/lib/api'
+import { getErrorMessage } from '@/lib/utils'
 
 // ─── Hilfsfunktion ───────────────────────────────────────────────────────────
 
@@ -172,7 +173,7 @@ function CreateKeyForm({
       setSecret(s)
       setName('')
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Fehler beim Erstellen')
+      setError(getErrorMessage(err, 'Fehler beim Erstellen'))
     } finally {
       setLoading(false)
     }
@@ -408,7 +409,7 @@ export default function DHCPPage() {
       setKeys(keysRes.data ?? [])
       setDdnsError('')
     } catch (err) {
-      setDdnsError(err instanceof Error ? err.message : 'Fehler beim Laden')
+      setDdnsError(getErrorMessage(err, 'Fehler beim Laden'))
     }
   }, [])
 

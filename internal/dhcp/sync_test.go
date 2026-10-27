@@ -100,8 +100,8 @@ func TestSyncManager_SyncOnce_NewLeases(t *testing.T) {
 	store := newMockStore()
 	parser := &mockParser{
 		leases: []Lease{
-			{MAC: "aa:bb:cc:dd:ee:01", IP: "192.0.2.10", Hostname: "laptop"},
-			{MAC: "aa:bb:cc:dd:ee:02", IP: "192.0.2.11", Hostname: "server"},
+			{MAC: "aa:bb:cc:dd:ee:01", IP: "192.168.42.10", Hostname: "laptop"},
+			{MAC: "aa:bb:cc:dd:ee:02", IP: "192.168.42.11", Hostname: "server"},
 		},
 	}
 
@@ -132,7 +132,7 @@ func TestSyncManager_SyncOnce_NewLeases(t *testing.T) {
 	}
 
 	// Verify: reverse zone created
-	revZone, err := store.GetZone(context.Background(), "2.0.192.in-addr.arpa")
+	revZone, err := store.GetZone(context.Background(), "42.168.192.in-addr.arpa")
 	if err != nil {
 		t.Fatalf("Reverse-Zone nicht erstellt: %v", err)
 	}
@@ -156,7 +156,7 @@ func TestSyncManager_SyncOnce_DeletedLeases(t *testing.T) {
 	store := newMockStore()
 	parser := &mockParser{
 		leases: []Lease{
-			{MAC: "aa:bb:cc:dd:ee:01", IP: "192.0.2.10", Hostname: "laptop"},
+			{MAC: "aa:bb:cc:dd:ee:01", IP: "192.168.42.10", Hostname: "laptop"},
 		},
 	}
 
@@ -201,7 +201,7 @@ func TestSyncManager_SyncOnce_HostnameChanged(t *testing.T) {
 	store := newMockStore()
 	parser := &mockParser{
 		leases: []Lease{
-			{MAC: "aa:bb:cc:dd:ee:01", IP: "192.0.2.10", Hostname: "laptop"},
+			{MAC: "aa:bb:cc:dd:ee:01", IP: "192.168.42.10", Hostname: "laptop"},
 		},
 	}
 
@@ -222,7 +222,7 @@ func TestSyncManager_SyncOnce_HostnameChanged(t *testing.T) {
 
 	// Hostname aendern
 	parser.leases = []Lease{
-		{MAC: "aa:bb:cc:dd:ee:01", IP: "192.0.2.10", Hostname: "desktop"},
+		{MAC: "aa:bb:cc:dd:ee:01", IP: "192.168.42.10", Hostname: "desktop"},
 	}
 	sm.syncOnce(context.Background())
 
@@ -248,8 +248,8 @@ func TestSyncManager_SanitizesHostnames(t *testing.T) {
 	store := newMockStore()
 	parser := &mockParser{
 		leases: []Lease{
-			{MAC: "aa:bb:cc:dd:ee:01", IP: "192.0.2.10", Hostname: "My Laptop!"},
-			{MAC: "aa:bb:cc:dd:ee:02", IP: "192.0.2.11", Hostname: "*"},
+			{MAC: "aa:bb:cc:dd:ee:01", IP: "192.168.42.10", Hostname: "My Laptop!"},
+			{MAC: "aa:bb:cc:dd:ee:02", IP: "192.168.42.11", Hostname: "*"},
 		},
 	}
 
@@ -283,7 +283,7 @@ func TestAutoReverseZone(t *testing.T) {
 		ip   string
 		want string
 	}{
-		{"192.0.2.42", "2.0.192.in-addr.arpa"},
+		{"192.168.42.42", "42.168.192.in-addr.arpa"},
 		{"10.0.0.1", "0.0.10.in-addr.arpa"},
 		{"172.16.5.100", "5.16.172.in-addr.arpa"},
 		{"invalid", ""},
@@ -304,7 +304,7 @@ func TestPTRName(t *testing.T) {
 		ip   string
 		want string
 	}{
-		{"192.0.2.42", "42"},
+		{"192.168.42.42", "42"},
 		{"10.0.0.1", "1"},
 		{"invalid", ""},
 	}
@@ -322,7 +322,7 @@ func TestSyncManager_AutoCreateDisabled(t *testing.T) {
 	store := newMockStore()
 	parser := &mockParser{
 		leases: []Lease{
-			{MAC: "aa:bb:cc:dd:ee:01", IP: "192.0.2.10", Hostname: "laptop"},
+			{MAC: "aa:bb:cc:dd:ee:01", IP: "192.168.42.10", Hostname: "laptop"},
 		},
 	}
 

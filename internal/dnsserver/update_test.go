@@ -123,7 +123,7 @@ func TestDDNS_AddARecord(t *testing.T) {
 			Class:  miekgdns.ClassINET,
 			Ttl:    60,
 		},
-		A: net.ParseIP("192.0.2.42"),
+		A: net.ParseIP("192.168.42.42"),
 	}
 
 	msg := makeATsigMsg("home.", keyName, secret, []miekgdns.RR{rr})
@@ -142,7 +142,7 @@ func TestDDNS_AddARecord(t *testing.T) {
 	if len(records) != 1 {
 		t.Fatalf("erwartet 1 Record, bekam %d", len(records))
 	}
-	if records[0].Value != "192.0.2.42" {
+	if records[0].Value != "192.168.42.42" {
 		t.Errorf("falsche IP: %s", records[0].Value)
 	}
 
@@ -159,7 +159,7 @@ func TestDDNS_DeleteARecord_ClassNONE(t *testing.T) {
 	st := newMockDDNSStore()
 	st.zones["home"] = &dns.Zone{Domain: "home"}
 	st.records["home"] = []dns.Record{
-		{ID: 1, Name: "laptop", Type: dns.TypeA, TTL: 60, Value: "192.0.2.42"},
+		{ID: 1, Name: "laptop", Type: dns.TypeA, TTL: 60, Value: "192.168.42.42"},
 	}
 
 	keyName := "test-key"
@@ -175,7 +175,7 @@ func TestDDNS_DeleteARecord_ClassNONE(t *testing.T) {
 			Class:  miekgdns.ClassNONE,
 			Ttl:    0,
 		},
-		A: net.ParseIP("192.0.2.42"),
+		A: net.ParseIP("192.168.42.42"),
 	}
 
 	msg := makeATsigMsg("home.", keyName, secret, []miekgdns.RR{rr})
@@ -195,9 +195,9 @@ func TestDDNS_DeleteAllRecords_ClassANY(t *testing.T) {
 	st := newMockDDNSStore()
 	st.zones["home"] = &dns.Zone{Domain: "home"}
 	st.records["home"] = []dns.Record{
-		{ID: 1, Name: "server", Type: dns.TypeA, TTL: 60, Value: "192.0.2.10"},
+		{ID: 1, Name: "server", Type: dns.TypeA, TTL: 60, Value: "192.168.42.10"},
 		{ID: 2, Name: "server", Type: dns.TypeAAAA, TTL: 60, Value: "::1"},
-		{ID: 3, Name: "other", Type: dns.TypeA, TTL: 60, Value: "192.0.2.20"},
+		{ID: 3, Name: "other", Type: dns.TypeA, TTL: 60, Value: "192.168.42.20"},
 	}
 
 	keyName := "test-key"

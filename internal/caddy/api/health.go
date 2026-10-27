@@ -9,12 +9,19 @@ import (
 
 // HealthHandler handles GET /api/health.
 type HealthHandler struct {
-	dbCheck func(ctx context.Context) error
+	dbCheck      func(ctx context.Context) error
+	clusterCheck func() bool // optional; returns false when cluster is misconfigured
 }
 
 // NewHealthHandler creates a health check handler.
 func NewHealthHandler(dbCheck func(ctx context.Context) error) *HealthHandler {
 	return &HealthHandler{dbCheck: dbCheck}
+}
+
+// SetClusterCheck registers an optional cluster-readiness check.
+// When fn returns false, the health status is reported as "degraded".
+func (h *HealthHandler) SetClusterCheck(fn func() bool) {
+	h.clusterCheck = fn
 }
 
 // ServeHTTP implements http.Handler.
@@ -30,6 +37,10 @@ func (h *HealthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			log.Debug().Err(err).Msg("health check: database unreachable")
 			status = "degraded"
 		}
+	}
+	if h.clusterCheck != nil && !h.clusterCheck() {
+		log.Debug().Msg("health check: cluster misconfigured")
+		status = "degraded"
 	}
 	writeSuccess(w, map[string]string{"status": status}, http.StatusOK)
 }

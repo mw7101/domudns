@@ -7,26 +7,74 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/mw7101/domudns/internal/store"
 	"github.com/rs/zerolog/log"
 )
 
+// urlDomainEntry holds a single URL's domain set for in-memory tracking.
+type urlDomainEntry struct {
+	category string
+	domains  map[string]struct{}
+}
+
 // BlocklistManager manages blocklist domains, wildcard/regex patterns, and whitelist IPs in-memory.
 type BlocklistManager struct {
-	domains   map[string]struct{} // Blocked domains (exact match)
-	wildcards []string            // Wildcard suffixes (suffix after "*."), e.g. "doubleclick.net"
-	regexps   []*regexp.Regexp    // Compiled regex patterns
-	whitelist []*net.IPNet        // Whitelisted IP CIDRs
+	// Flat maps for fast O(1) lookup — rebuilt after every update.
+	uncatDomains map[string]struct{}
+	catDomains   map[string]map[string]struct{}
+	// Per-source domain sets for targeted in-memory updates (no disk I/O).
+	urlSets        map[int]urlDomainEntry // urlID → domain set
+	manualDomains  map[string]struct{}    // manually added domains (always uncategorized)
+	allowedDomains map[string]struct{}    // exempt domains — excluded from flat maps
+	// Patterns and IP whitelist
+	wildcards []string
+	regexps   []*regexp.Regexp
+	whitelist []*net.IPNet
 	mu        sync.RWMutex
 }
 
 // NewBlocklistManager creates a new blocklist manager.
 func NewBlocklistManager() *BlocklistManager {
 	return &BlocklistManager{
-		domains:   make(map[string]struct{}),
-		wildcards: make([]string, 0),
-		regexps:   make([]*regexp.Regexp, 0),
-		whitelist: make([]*net.IPNet, 0),
+		uncatDomains:   make(map[string]struct{}),
+		catDomains:     make(map[string]map[string]struct{}),
+		urlSets:        make(map[int]urlDomainEntry),
+		manualDomains:  make(map[string]struct{}),
+		allowedDomains: make(map[string]struct{}),
+		wildcards:      make([]string, 0),
+		regexps:        make([]*regexp.Regexp, 0),
+		whitelist:      make([]*net.IPNet, 0),
 	}
+}
+
+// rebuildFlatMapsLocked rebuilds uncatDomains and catDomains from urlSets and manualDomains.
+// Must be called with b.mu held for writing.
+func (b *BlocklistManager) rebuildFlatMapsLocked() {
+	uncatDomains := make(map[string]struct{})
+	catDomains := make(map[string]map[string]struct{})
+
+	for _, entry := range b.urlSets {
+		if entry.category == "" {
+			for d := range entry.domains {
+				uncatDomains[d] = struct{}{}
+			}
+		} else {
+			if catDomains[entry.category] == nil {
+				catDomains[entry.category] = make(map[string]struct{})
+			}
+			for d := range entry.domains {
+				catDomains[entry.category][d] = struct{}{}
+			}
+		}
+	}
+
+	// Manual domains are always uncategorized
+	for d := range b.manualDomains {
+		uncatDomains[d] = struct{}{}
+	}
+
+	b.uncatDomains = uncatDomains
+	b.catDomains = catDomains
 }
 
 // parseCIDRList parses a list of IP/CIDR strings into []*net.IPNet.
@@ -57,54 +105,147 @@ func parseCIDRList(cidrs []string) []*net.IPNet {
 	return result
 }
 
-// Load loads blocklist domains, patterns, and whitelist IPs from the store.
-func (b *BlocklistManager) Load(ctx context.Context, store BlocklistProvider) error {
-	// Load blocked domains
-	domains, err := store.GetBlockedDomains(ctx)
-	if err != nil {
-		return err
-	}
+// blocklistSources holds the raw data Load fetches from the provider,
+// before building the in-memory lookup structures.
+type blocklistSources struct {
+	urlSets          []store.URLDomainSet
+	manualList       []string
+	allowedList      []string
+	whitelistCIDRs   []string
+	wildcardPatterns []string
+	regexpPatterns   []string
+}
 
-	// Load whitelist IPs
-	whitelistCIDRs, err := store.GetWhitelistIPs(ctx)
-	if err != nil {
-		return err
-	}
+// loadBlocklistSources fetches everything Load needs from provider. A
+// failed pattern fetch is logged and treated as "no patterns" rather than
+// failing the whole load — patterns are the least critical source.
+func loadBlocklistSources(ctx context.Context, provider BlocklistProvider) (blocklistSources, error) {
+	var s blocklistSources
+	var err error
 
-	// Load wildcard/regex patterns (non-fatal if not supported)
-	var wildcardPatterns, regexpPatterns []string
-	if wp, rp, err := store.GetBlocklistPatterns(ctx); err == nil {
-		wildcardPatterns = wp
-		regexpPatterns = rp
+	if s.urlSets, err = provider.GetBlocklistURLSets(ctx); err != nil {
+		return blocklistSources{}, err
+	}
+	if s.manualList, err = provider.GetManualBlockedDomains(ctx); err != nil {
+		return blocklistSources{}, err
+	}
+	if s.allowedList, err = provider.GetAllowedBlockedDomains(ctx); err != nil {
+		return blocklistSources{}, err
+	}
+	if s.whitelistCIDRs, err = provider.GetWhitelistIPs(ctx); err != nil {
+		return blocklistSources{}, err
+	}
+	if wp, rp, err := provider.GetBlocklistPatterns(ctx); err == nil {
+		s.wildcardPatterns, s.regexpPatterns = wp, rp
 	} else {
 		log.Warn().Err(err).Msg("blocklist: failed to load patterns")
 	}
+	return s, nil
+}
 
-	whitelist := parseCIDRList(whitelistCIDRs)
-	wildcards := parseWildcards(wildcardPatterns)
-	regexps := compileRegexps(regexpPatterns)
+// buildDomainSet normalizes list (lowercase, no trailing dot) into a set.
+func buildDomainSet(list []string) map[string]struct{} {
+	set := make(map[string]struct{}, len(list))
+	for _, d := range list {
+		set[strings.ToLower(strings.TrimSuffix(d, "."))] = struct{}{}
+	}
+	return set
+}
 
-	// Update in-memory data
+// buildFilteredDomainSet is buildDomainSet, excluding entries present in
+// allowedDomains.
+func buildFilteredDomainSet(list []string, allowedDomains map[string]struct{}) map[string]struct{} {
+	set := make(map[string]struct{}, len(list))
+	for _, d := range list {
+		norm := strings.ToLower(strings.TrimSuffix(d, "."))
+		if _, blocked := allowedDomains[norm]; !blocked {
+			set[norm] = struct{}{}
+		}
+	}
+	return set
+}
+
+// buildFilteredURLSets converts urlSets to the internal map keyed by URL
+// ID, excluding domains present in allowedDomains.
+func buildFilteredURLSets(urlSets []store.URLDomainSet, allowedDomains map[string]struct{}) map[int]urlDomainEntry {
+	newURLSets := make(map[int]urlDomainEntry, len(urlSets))
+	for _, us := range urlSets {
+		newURLSets[us.URLID] = urlDomainEntry{
+			category: us.Category,
+			domains:  buildFilteredDomainSet(us.Domains, allowedDomains),
+		}
+	}
+	return newURLSets
+}
+
+// Load loads blocklist domains (with categories), patterns, and whitelist IPs from the store.
+func (b *BlocklistManager) Load(ctx context.Context, provider BlocklistProvider) error {
+	src, err := loadBlocklistSources(ctx, provider)
+	if err != nil {
+		return err
+	}
+
+	whitelist := parseCIDRList(src.whitelistCIDRs)
+	wildcards := parseWildcards(src.wildcardPatterns)
+	regexps := compileRegexps(src.regexpPatterns)
+
+	allowedDomains := buildDomainSet(src.allowedList)
+	manualDomains := buildFilteredDomainSet(src.manualList, allowedDomains)
+	newURLSets := buildFilteredURLSets(src.urlSets, allowedDomains)
+
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	b.domains = make(map[string]struct{}, len(domains))
-	for _, domain := range domains {
-		normalized := strings.ToLower(strings.TrimSuffix(domain, "."))
-		b.domains[normalized] = struct{}{}
-	}
+	b.urlSets = newURLSets
+	b.manualDomains = manualDomains
+	b.allowedDomains = allowedDomains
 	b.whitelist = whitelist
 	b.wildcards = wildcards
 	b.regexps = regexps
 
+	b.rebuildFlatMapsLocked()
+
+	totalCat := 0
+	for _, s := range b.catDomains {
+		totalCat += len(s)
+	}
 	log.Info().
-		Int("blocked_domains", len(b.domains)).
-		Int("wildcards", len(b.wildcards)).
-		Int("regexps", len(b.regexps)).
+		Int("uncategorized_domains", len(b.uncatDomains)).
+		Int("categorized_domains", totalCat).
+		Int("wildcards", len(wildcards)).
+		Int("regexps", len(regexps)).
 		Int("whitelist_ips", len(b.whitelist)).
 		Msg("blocklist loaded")
 
 	return nil
+}
+
+// ApplyURLDomains updates the in-memory blocklist for a single URL without any disk I/O.
+// Called by the cluster receiver after EventURLDomains is stored to disk.
+// The rebuild of the flat lookup maps is O(total_domains) over in-memory maps — typically <100ms.
+func (b *BlocklistManager) ApplyURLDomains(urlID int, category string, domains []string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	entry := urlDomainEntry{
+		category: category,
+		domains:  make(map[string]struct{}, len(domains)),
+	}
+	for _, d := range domains {
+		norm := strings.ToLower(strings.TrimSuffix(d, "."))
+		if _, allowed := b.allowedDomains[norm]; !allowed {
+			entry.domains[norm] = struct{}{}
+		}
+	}
+
+	b.urlSets[urlID] = entry
+	b.rebuildFlatMapsLocked()
+
+	log.Debug().
+		Int("url_id", urlID).
+		Str("category", category).
+		Int("domains", len(entry.domains)).
+		Msg("blocklist: URL domains updated in-memory")
 }
 
 // parseWildcards extracts suffixes from wildcard patterns (e.g. "*.doubleclick.net" → "doubleclick.net").
@@ -155,38 +296,44 @@ func (b *BlocklistManager) ReloadWhitelist(ctx context.Context, store BlocklistP
 	return nil
 }
 
-// IsBlocked checks if a domain is in the blocklist (exact, wildcard, or regex).
-// Snapshot pattern: the lock is held only briefly for the exact match; wildcard and
-// regex iteration run lock-free on a shallow copy of the slice headers.
-func (b *BlocklistManager) IsBlocked(domain string) bool {
+// IsBlocked checks if a domain is blocked for a client with the given enabled categories.
+// Uncategorized domains (category="") are always checked.
+// Categorized domains are checked only if their category is in enabledCats.
+func (b *BlocklistManager) IsBlocked(domain string, enabledCats []string) bool {
 	normalized := strings.ToLower(strings.TrimSuffix(domain, "."))
 
 	b.mu.RLock()
-	_, exactHit := b.domains[normalized]
+	_, uncatHit := b.uncatDomains[normalized]
+	// Check categorized domains under lock
+	catHit := false
+	for _, cat := range enabledCats {
+		if set, ok := b.catDomains[cat]; ok {
+			if _, ok := set[normalized]; ok {
+				catHit = true
+				break
+			}
+		}
+	}
 	// Copy slice headers (shallow copy; elements are immutable after Load)
 	wildcards := b.wildcards
 	regexps := b.regexps
 	b.mu.RUnlock()
 
-	// 1. Exact match (O(1)) — already checked under lock
-	if exactHit {
+	if uncatHit || catHit {
 		return true
 	}
 
-	// 2. Wildcard match: suffix "doubleclick.net" matches "a.doubleclick.net" and "doubleclick.net"
+	// Wildcards and regexps are always uncategorized in v1
 	for _, suffix := range wildcards {
 		if normalized == suffix || strings.HasSuffix(normalized, "."+suffix) {
 			return true
 		}
 	}
-
-	// 3. Regex match (Go regexp uses RE2 → no catastrophic backtracking risk)
 	for _, re := range regexps {
 		if re.MatchString(normalized) {
 			return true
 		}
 	}
-
 	return false
 }
 
@@ -207,5 +354,9 @@ func (b *BlocklistManager) IsWhitelisted(ip net.IP) bool {
 func (b *BlocklistManager) Stats() (blockedDomains, wildcards, regexps, whitelistIPs int) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-	return len(b.domains), len(b.wildcards), len(b.regexps), len(b.whitelist)
+	total := len(b.uncatDomains)
+	for _, s := range b.catDomains {
+		total += len(s)
+	}
+	return total, len(b.wildcards), len(b.regexps), len(b.whitelist)
 }

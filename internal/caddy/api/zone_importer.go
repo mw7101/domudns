@@ -15,6 +15,8 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+const maxAXFRRecords = 50000
+
 // maxZoneFileSize is the maximum accepted zone file size (10 MB).
 const maxZoneFileSize = 10 * 1024 * 1024
 
@@ -54,6 +56,7 @@ func (h *ImportExportHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 // handleImportZoneFile imports an RFC 1035 zone file via multipart upload.
 // POST /api/zones/import (multipart/form-data, fields: file, domain, view)
 func (h *ImportExportHandler) handleImportZoneFile(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxZoneFileSize)
 	if err := r.ParseMultipartForm(maxZoneFileSize); err != nil {
 		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "Failed to parse multipart form")
 		return
@@ -64,7 +67,7 @@ func (h *ImportExportHandler) handleImportZoneFile(w http.ResponseWriter, r *htt
 		writeError(w, http.StatusBadRequest, "MISSING_FILE", "Zone file is required (field: file)")
 		return
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	domain := strings.TrimSpace(r.FormValue("domain"))
 	view := strings.TrimSpace(r.FormValue("view"))
@@ -84,31 +87,13 @@ func (h *ImportExportHandler) handleImportZoneFile(w http.ResponseWriter, r *htt
 		origin = mdns.Fqdn(domain)
 	}
 
-	rrs, parseErr := parseZoneFile(file, origin)
-	if parseErr != nil {
-		writeError(w, http.StatusBadRequest, "INVALID_ZONE_FILE", parseErr.Error())
-		return
-	}
-	if len(rrs) == 0 {
-		writeError(w, http.StatusBadRequest, "EMPTY_ZONE_FILE", "Zone file contains no valid records")
+	rrs, ok := parseUploadedZoneFile(w, file, origin)
+	if !ok {
 		return
 	}
 
-	// Extract domain from SOA if not provided
-	if domain == "" {
-		for _, rr := range rrs {
-			if soa, ok := rr.(*mdns.SOA); ok {
-				domain = strings.TrimSuffix(soa.Hdr.Name, ".")
-				break
-			}
-		}
-	}
-	if domain == "" {
-		writeError(w, http.StatusBadRequest, "MISSING_DOMAIN", "Domain could not be determined; include a SOA record or pass domain= form field")
-		return
-	}
-	if !dns.IsValidDomain(domain) {
-		writeError(w, http.StatusBadRequest, "INVALID_ZONE", "Invalid domain name extracted from zone file")
+	domain, ok = resolveImportDomain(w, rrs, domain)
+	if !ok {
 		return
 	}
 
@@ -132,50 +117,76 @@ func (h *ImportExportHandler) handleImportZoneFile(w http.ResponseWriter, r *htt
 	}, http.StatusOK)
 }
 
-// handleImportAXFR imports a zone via AXFR from a remote DNS server.
-// POST /api/zones/import/axfr
-// Body: {"server": "1.2.3.4:53", "domain": "example.com", "view": ""}
-func (h *ImportExportHandler) handleImportAXFR(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Server string `json:"server"`
-		Domain string `json:"domain"`
-		View   string `json:"view"`
-	}
+// axfrImportRequest is the decoded POST body for an AXFR zone import.
+type axfrImportRequest struct {
+	Server string `json:"server"`
+	Domain string `json:"domain"`
+	View   string `json:"view"`
+}
+
+// parseAXFRImportRequest decodes and validates the AXFR import request
+// body. Writes the error response itself on failure.
+func parseAXFRImportRequest(w http.ResponseWriter, r *http.Request) (axfrImportRequest, bool) {
+	var req axfrImportRequest
 	if err := DecodeJSON(r, &req, 0); err != nil {
 		writeError(w, http.StatusBadRequest, "INVALID_JSON", "Invalid request body")
-		return
+		return axfrImportRequest{}, false
 	}
-
 	req.Server = strings.TrimSpace(req.Server)
 	req.Domain = strings.TrimSpace(req.Domain)
 	req.View = strings.TrimSpace(req.View)
 
 	if req.Server == "" {
 		writeError(w, http.StatusBadRequest, "MISSING_SERVER", "server is required")
-		return
+		return axfrImportRequest{}, false
 	}
 	if req.Domain == "" {
 		writeError(w, http.StatusBadRequest, "MISSING_DOMAIN", "domain is required")
-		return
+		return axfrImportRequest{}, false
 	}
 	if !dns.IsValidDomain(req.Domain) {
 		writeError(w, http.StatusBadRequest, "INVALID_DOMAIN", "Invalid domain name")
-		return
+		return axfrImportRequest{}, false
 	}
 	if req.View != "" && !isValidViewName(req.View) {
 		writeError(w, http.StatusBadRequest, "INVALID_VIEW", "Invalid view name (only [a-z0-9_-] allowed)")
+		return axfrImportRequest{}, false
+	}
+	return req, true
+}
+
+// resolveAXFRServer normalizes server to host:port (default :53) and
+// rejects private/loopback targets (SSRF prevention). Writes the error
+// response itself on failure.
+func resolveAXFRServer(w http.ResponseWriter, rawServer string) (string, bool) {
+	server := rawServer
+	if _, _, err := net.SplitHostPort(server); err != nil {
+		server = server + ":53"
+	}
+	if err := validateAXFRServer(server); err != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_SERVER", err.Error())
+		return "", false
+	}
+	return server, true
+}
+
+// handleImportAXFR imports a zone via AXFR from a remote DNS server.
+// POST /api/zones/import/axfr
+// Body: {"server": "1.2.3.4:53", "domain": "example.com", "view": ""}
+func (h *ImportExportHandler) handleImportAXFR(w http.ResponseWriter, r *http.Request) {
+	req, ok := parseAXFRImportRequest(w, r)
+	if !ok {
 		return
 	}
 
-	// Normalize server address (ensure port)
-	server := req.Server
-	if _, _, err := net.SplitHostPort(server); err != nil {
-		server = server + ":53"
+	server, ok := resolveAXFRServer(w, req.Server)
+	if !ok {
+		return
 	}
 
 	rrs, err := axfrTransfer(server, req.Domain)
 	if err != nil {
-		writeError(w, http.StatusBadGateway, "AXFR_ERROR", fmt.Sprintf("AXFR transfer failed: %s", err.Error()))
+		writeInternalError(w, "AXFR_ERROR", fmt.Errorf("axfr transfer from %s: %w", server, err))
 		return
 	}
 	if len(rrs) == 0 {
@@ -201,6 +212,43 @@ func (h *ImportExportHandler) handleImportAXFR(w http.ResponseWriter, r *http.Re
 		"imported": imported,
 		"merged":   merged,
 	}, http.StatusOK)
+}
+
+// parseUploadedZoneFile parses the uploaded RFC 1035 zone file and rejects
+// an empty result. Writes the error response itself on failure.
+func parseUploadedZoneFile(w http.ResponseWriter, file io.Reader, origin string) ([]mdns.RR, bool) {
+	rrs, parseErr := parseZoneFile(file, origin)
+	if parseErr != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_ZONE_FILE", parseErr.Error())
+		return nil, false
+	}
+	if len(rrs) == 0 {
+		writeError(w, http.StatusBadRequest, "EMPTY_ZONE_FILE", "Zone file contains no valid records")
+		return nil, false
+	}
+	return rrs, true
+}
+
+// resolveImportDomain returns domain if given, otherwise extracts it from
+// the zone file's SOA record. Writes the error response itself on failure.
+func resolveImportDomain(w http.ResponseWriter, rrs []mdns.RR, domain string) (string, bool) {
+	if domain == "" {
+		for _, rr := range rrs {
+			if soa, ok := rr.(*mdns.SOA); ok {
+				domain = strings.TrimSuffix(soa.Hdr.Name, ".")
+				break
+			}
+		}
+	}
+	if domain == "" {
+		writeError(w, http.StatusBadRequest, "MISSING_DOMAIN", "Domain could not be determined; include a SOA record or pass domain= form field")
+		return "", false
+	}
+	if !dns.IsValidDomain(domain) {
+		writeError(w, http.StatusBadRequest, "INVALID_ZONE", "Invalid domain name extracted from zone file")
+		return "", false
+	}
+	return domain, true
 }
 
 // importAndMerge converts RRs to a zone, merges with an existing zone (if any), and stores it.
@@ -257,6 +305,28 @@ func parseZoneFile(r io.Reader, origin string) ([]mdns.RR, error) {
 	return rrs, nil
 }
 
+// validateAXFRServer rejects private/loopback IPs to prevent SSRF.
+func validateAXFRServer(server string) error {
+	host, _, err := net.SplitHostPort(server)
+	if err != nil {
+		return fmt.Errorf("invalid server address")
+	}
+	ips, err := net.LookupHost(host)
+	if err != nil {
+		return fmt.Errorf("cannot resolve server hostname")
+	}
+	for _, ipStr := range ips {
+		ip := net.ParseIP(ipStr)
+		if ip == nil {
+			continue
+		}
+		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+			return fmt.Errorf("AXFR to private/loopback addresses is not allowed")
+		}
+	}
+	return nil
+}
+
 // axfrTransfer performs an AXFR zone transfer from a remote server.
 func axfrTransfer(server, domain string) ([]mdns.RR, error) {
 	msg := new(mdns.Msg)
@@ -277,6 +347,9 @@ func axfrTransfer(server, domain string) ([]mdns.RR, error) {
 			return nil, fmt.Errorf("transfer error: %w", env.Error)
 		}
 		rrs = append(rrs, env.RR...)
+		if len(rrs) > maxAXFRRecords {
+			return nil, fmt.Errorf("AXFR exceeded maximum record count (%d)", maxAXFRRecords)
+		}
 	}
 	return rrs, nil
 }
@@ -309,12 +382,26 @@ func rrsToZone(rrs []mdns.RR, domain, view string) *dns.Zone {
 			continue
 		}
 
+		// Skip RRs whose owner name is neither the zone apex nor inside the
+		// zone. normalizeRecordName leaves an out-of-zone FQDN unchanged, and
+		// such a record could be stored but never served.
+		fqdn := strings.ToLower(strings.TrimSuffix(rr.Header().Name, "."))
+		zd := strings.ToLower(strings.TrimSuffix(domain, "."))
+		if fqdn != zd && !strings.HasSuffix(fqdn, "."+zd) {
+			log.Debug().Str("name", rr.Header().Name).Str("zone", domain).Msg("zone import: skipping out-of-zone record")
+			continue
+		}
+
 		rec, ok := rrToRecord(rr, domain)
 		if !ok {
 			continue
 		}
 		if int(rr.Header().Ttl) > 0 {
 			rec.TTL = int(rr.Header().Ttl)
+		}
+		if err := dns.ValidateRecord(rec, domain); err != nil {
+			log.Debug().Err(err).Str("name", rec.Name).Str("type", string(rec.Type)).Msg("zone import: skipping invalid record")
+			continue
 		}
 		rec.ID = nextID
 		nextID++

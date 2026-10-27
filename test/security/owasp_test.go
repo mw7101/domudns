@@ -18,6 +18,7 @@ package security
 
 import (
 	"context"
+	"crypto"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -40,7 +41,7 @@ type mockBlocklistStore struct{}
 func (m *mockBlocklistStore) ListBlocklistURLs(ctx context.Context) ([]store.BlocklistURL, error) {
 	return nil, nil
 }
-func (m *mockBlocklistStore) AddBlocklistURL(ctx context.Context, url string, enabled bool) (*store.BlocklistURL, error) {
+func (m *mockBlocklistStore) AddBlocklistURL(ctx context.Context, url string, category string, enabled bool) (*store.BlocklistURL, error) {
 	return &store.BlocklistURL{ID: 1, URL: url, Enabled: enabled, CreatedAt: time.Now()}, nil
 }
 func (m *mockBlocklistStore) RemoveBlocklistURL(ctx context.Context, id int) error { return nil }
@@ -137,6 +138,31 @@ func (m *mockStore) DeleteZoneView(_ context.Context, domain, view string) error
 	return nil
 }
 
+// UpdateZone mirrors filestore.FileStore.UpdateZone: mutate runs against a
+// private copy, which only replaces the stored zone if mutate succeeds, so
+// a failed mutate leaves the fixture untouched (no partial writes).
+func (m *mockStore) UpdateZone(_ context.Context, domain, view string, mutate func(*dns.Zone) error) error {
+	key := domain
+	if view != "" {
+		key = domain + "@" + view
+	}
+	orig, ok := m.zones[key]
+	if !ok {
+		return dns.ErrZoneNotFound
+	}
+	cp := *orig
+	cp.Records = append([]dns.Record(nil), orig.Records...)
+	if orig.SOA != nil {
+		soa := *orig.SOA
+		cp.SOA = &soa
+	}
+	if err := mutate(&cp); err != nil {
+		return err
+	}
+	m.zones[key] = &cp
+	return nil
+}
+
 func (m *mockStore) PutRecord(ctx context.Context, zoneDomain string, record *dns.Record) error {
 	z, ok := m.zones[zoneDomain]
 	if !ok {
@@ -213,6 +239,38 @@ func (m *mockStore) MarkSetupCompleted(ctx context.Context) error {
 	return nil
 }
 
+func (m *mockStore) GetClientGroups(_ context.Context) ([]*dns.ClientGroup, error) {
+	return []*dns.ClientGroup{}, nil
+}
+
+func (m *mockStore) SetClientGroups(_ context.Context, _ []*dns.ClientGroup) error {
+	return nil
+}
+
+func (m *mockStore) GetTLSACMEConfig(_ context.Context) (*store.TLSACMEConfig, error) {
+	return nil, nil
+}
+
+func (m *mockStore) SetTLSACMEConfig(_ context.Context, _ *store.TLSACMEConfig) error {
+	return nil
+}
+
+func (m *mockStore) GetTLSCert(_ context.Context) (*store.TLSCertPayload, error) {
+	return nil, nil
+}
+
+func (m *mockStore) SetTLSCert(_ context.Context, _ *store.TLSCertPayload) error {
+	return nil
+}
+
+func (m *mockStore) GetACMEAccountKey(_ context.Context) (crypto.Signer, error) {
+	return nil, nil
+}
+
+func (m *mockStore) SetACMEAccountKey(_ context.Context, _ crypto.Signer) error {
+	return nil
+}
+
 // testRouter builds a router with mock store for OWASP tests.
 func testRouter(t *testing.T, apiKey string) *api.Router {
 	t.Helper()
@@ -232,7 +290,7 @@ func testRouter(t *testing.T, apiKey string) *api.Router {
 	blocklist := api.NewBlocklistHandler(&mockBlocklistStore{}, cfg, nil)
 	setupHandler := api.NewSetupHandler(authMgr)
 	authHandler := api.NewAuthHandler(authMgr)
-	return api.NewRouter(health, metrics, configHandler, zones, records, acme, blocklist, authMgr, setupHandler, authHandler, api.NewSessionManager(), true)
+	return api.NewRouter(health, metrics, configHandler, zones, records, acme, blocklist, authMgr, setupHandler, authHandler, api.NewSessionManager(context.Background()), true)
 }
 
 // mockAuthStore ist ein In-Memory AuthStore für OWASP-Tests.
@@ -258,7 +316,7 @@ func (m *mockAuthStore) MarkSetupCompleted(ctx context.Context) error { return n
 // newTestAuthManager erstellt einen AuthManager mit dem gegebenen API-Key für Tests.
 func newTestAuthManager(t *testing.T, apiKey string) *api.AuthManager {
 	t.Helper()
-	s := &mockAuthStore{apiKey: apiKey}
+	s := &mockAuthStore{apiKey: apiKey, passwordHash: testPasswordHash}
 	am, err := api.NewAuthManager(context.Background(), s)
 	if err != nil {
 		t.Fatalf("NewAuthManager: %v", err)
@@ -267,6 +325,11 @@ func newTestAuthManager(t *testing.T, apiKey string) *api.AuthManager {
 }
 
 const testAPIKey = "valid-api-key-with-at-least-32-characters-long"
+
+// testPasswordHash is a pre-computed bcrypt hash (cost 4) for "admin".
+// Using a fixed hash avoids running bcrypt.GenerateFromPassword in every test
+// setup call, which would cause test timeouts when running with -race.
+const testPasswordHash = "$2a$04$WHg1yAu4kjyBlIt9.Isvh.uiVmmOdD3R2vmsIab09JWFrvjSICMx6"
 
 // --- API1:2023 Broken Object Level Authorization (BOLA) ---
 
@@ -369,7 +432,7 @@ func TestOWASP_API3_MassAssignmentRecordIDIgnoredOnCreate(t *testing.T) {
 	blocklist := api.NewBlocklistHandler(&mockBlocklistStore{}, cfg, nil)
 	setupHandler := api.NewSetupHandler(authMgr)
 	authHandler := api.NewAuthHandler(authMgr)
-	router := api.NewRouter(health, api.NewMetricsHandler(), configHandler, zones, records, acme, blocklist, authMgr, setupHandler, authHandler, api.NewSessionManager(), true)
+	router := api.NewRouter(health, api.NewMetricsHandler(), configHandler, zones, records, acme, blocklist, authMgr, setupHandler, authHandler, api.NewSessionManager(context.Background()), true)
 
 	// Try to inject id:999 on create
 	body := `{"name":"www","type":"A","ttl":3600,"value":"192.168.1.1","id":999}`
@@ -396,7 +459,7 @@ func TestOWASP_API3_MassAssignmentRecordIDIgnoredOnCreate(t *testing.T) {
 // TestOWASP_API4_RateLimitEnforced verifies rate limiting when enabled.
 func TestOWASP_API4_RateLimitEnforced(t *testing.T) {
 	authMgr4 := newTestAuthManager(t, testAPIKey)
-	handler := api.AuthMiddleware(authMgr4, api.NewSessionManager(), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := api.AuthMiddleware(authMgr4, api.NewSessionManager(context.Background()), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	wrapped := api.RateLimitMiddleware(context.Background(), 2, false, handler) // 2 req/min

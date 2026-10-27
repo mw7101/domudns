@@ -26,17 +26,11 @@ func NewZonesHandler(store store.ZoneStore, zoneReload ZoneReloader) *ZonesHandl
 	return &ZonesHandler{store: store, zoneReload: zoneReload}
 }
 
-// isValidViewName checks if a view name is valid: only [a-z0-9_-], max 64 chars.
+// isValidViewName checks if a view name is valid: only [a-z0-9_-], max 64
+// chars. Thin wrapper so call sites across this package keep the short
+// unexported name; the actual charset lives in dns.IsValidViewName.
 func isValidViewName(name string) bool {
-	if len(name) == 0 || len(name) > 64 {
-		return false
-	}
-	for _, c := range name {
-		if !((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '-') {
-			return false
-		}
-	}
-	return true
+	return dns.IsValidViewName(name)
 }
 
 // ServeHTTP routes zone requests.
@@ -163,22 +157,16 @@ func (h *ZonesHandler) create(ctx context.Context, w http.ResponseWriter, r *htt
 	writeSuccess(w, zone, http.StatusCreated)
 }
 
+// zoneValidationError marks an error produced by the UpdateZone mutate
+// closure below as a client-side validation failure (400), as opposed to
+// dns.ErrZoneNotFound (404, returned by UpdateZone without calling mutate)
+// or any other error (500).
+type zoneValidationError struct{ err error }
+
+func (e *zoneValidationError) Error() string { return e.err.Error() }
+func (e *zoneValidationError) Unwrap() error { return e.err }
+
 func (h *ZonesHandler) update(ctx context.Context, w http.ResponseWriter, r *http.Request, domain, view string) {
-	var existing *dns.Zone
-	var err error
-	if view != "" {
-		existing, err = h.store.GetZoneView(ctx, domain, view)
-	} else {
-		existing, err = h.store.GetZone(ctx, domain)
-	}
-	if err == dns.ErrZoneNotFound {
-		writeError(w, http.StatusNotFound, "ZONE_NOT_FOUND", "Zone not found")
-		return
-	}
-	if err != nil {
-		writeInternalError(w, "DB_ERROR", err)
-		return
-	}
 	var zone dns.Zone
 	if err := DecodeJSON(r, &zone, 0); err != nil {
 		if errors.Is(err, ErrJSONDepthExceeded) {
@@ -193,21 +181,35 @@ func (h *ZonesHandler) update(ctx context.Context, w http.ResponseWriter, r *htt
 	if view != "" {
 		zone.View = view
 	}
-	// Preserve existing SOA when update doesn't provide one
-	if zone.SOA == nil && existing.SOA != nil {
-		zone.SOA = existing.SOA
-	}
-	zone.EnsureSOA()
-	if err := dns.ValidateZone(&zone); err != nil {
-		writeError(w, http.StatusBadRequest, "INVALID_ZONE", err.Error())
-		return
-	}
-	if err := h.store.PutZone(ctx, &zone); err != nil {
+
+	// UpdateZone holds a single write lock across load, merge, and
+	// validation — see internal/store/interfaces.go (ZoneWriter.UpdateZone)
+	// for why a separate GetZone+PutZone pair is not used here.
+	err := h.store.UpdateZone(ctx, domain, view, func(existing *dns.Zone) error {
+		// Preserve existing SOA when update doesn't provide one
+		if zone.SOA == nil && existing.SOA != nil {
+			zone.SOA = existing.SOA
+		}
+		zone.EnsureSOA()
+		if err := dns.ValidateZone(&zone); err != nil {
+			return &zoneValidationError{err}
+		}
+		*existing = zone
+		return nil
+	})
+
+	var valErr *zoneValidationError
+	switch {
+	case errors.As(err, &valErr):
+		writeError(w, http.StatusBadRequest, "INVALID_ZONE", valErr.Error())
+	case errors.Is(err, dns.ErrZoneNotFound):
+		writeError(w, http.StatusNotFound, "ZONE_NOT_FOUND", "Zone not found")
+	case err != nil:
 		writeInternalError(w, "DB_ERROR", err)
-		return
+	default:
+		h.triggerZoneReload()
+		writeSuccess(w, zone, http.StatusOK)
 	}
-	h.triggerZoneReload()
-	writeSuccess(w, zone, http.StatusOK)
 }
 
 func (h *ZonesHandler) delete(ctx context.Context, w http.ResponseWriter, domain string) {

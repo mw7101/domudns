@@ -38,35 +38,72 @@ var (
 	ErrALIASConflict = errors.New("ALIAS and CNAME cannot coexist at the same name")
 )
 
-// IsValidDNSLabel returns true if s is a valid DNS label (@, or max 63 chars: a-z, A-Z, 0-9, hyphen).
-func IsValidDNSLabel(s string) bool {
-	if s == "" {
+// isValidLabel validates a single DNS label: 1-63 chars, no leading or
+// trailing hyphen, and only characters isValidLabelChar allows.
+func isValidLabel(label string, allowUnderscore bool) bool {
+	if len(label) == 0 || len(label) > 63 {
 		return false
 	}
-	if s == "@" {
-		return true
-	}
-	if len(s) > 63 {
+	if label[0] == '-' || label[len(label)-1] == '-' {
 		return false
 	}
-	if s[0] == '-' || s[len(s)-1] == '-' {
-		return false
-	}
-	for _, c := range s {
-		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '*') {
+	for _, c := range label {
+		if !isValidLabelChar(c, allowUnderscore) {
 			return false
 		}
 	}
 	return true
 }
 
+// IsValidDNSLabel returns true if s is a valid DNS label (@, or max 63 chars: a-z, A-Z, 0-9, hyphen).
+func IsValidDNSLabel(s string) bool {
+	if s == "@" {
+		return true
+	}
+	return isValidLabel(s, true)
+}
+
+// IsValidRelativeRecordName reports whether s is a valid record name relative
+// to a zone: "@" for the apex, or one or more dot-separated labels
+// (e.g. "www", "_acme-challenge.pve-node"), each 1-63 chars. Every label uses the
+// same character rules as a hostname label (a-z, A-Z, 0-9, '-', '*', '_').
+// A multi-label name containing "*" (e.g. "*.dev") is rejected: a "*" label
+// only acts as a DNS wildcard when it is a record's sole label.
+func IsValidRelativeRecordName(s string) bool {
+	if s == "@" {
+		return true
+	}
+	if len(s) == 0 || len(s) > 253 {
+		return false
+	}
+	// A "*" label only acts as a DNS wildcard when it is a record's sole
+	// label (see ZoneManager.matchZoneRecords, which wildcards only a bare
+	// "*" for single-label subdomains). A multi-label name containing "*"
+	// (e.g. "*.dev") would be stored but never match as a wildcard, so reject
+	// it rather than accept a silent no-op. Single-label "*" and literal
+	// "*"-containing single labels (e.g. "a*b") keep their previous behaviour.
+	if strings.Contains(s, ".") && strings.Contains(s, "*") {
+		return false
+	}
+	for _, label := range strings.Split(s, ".") {
+		if !isValidLabel(label, true) {
+			return false
+		}
+	}
+	return true
+}
+
+// MinRecordTTL is the minimum TTL (in seconds) a stored record may have.
+// The API layer clamps client-supplied values to it instead of rejecting them.
+const MinRecordTTL = 300
+
 // ValidateRecord validates a DNS record according to type-specific rules.
 func ValidateRecord(record Record, zoneDomain string) error {
-	// Validate name (must be @ or valid DNS label)
+	// Validate name (must be @ or a valid zone-relative record name)
 	if record.Name == "" {
 		return fmt.Errorf("%w: name cannot be empty", ErrInvalidDomain)
 	}
-	if !IsValidDNSLabel(record.Name) {
+	if !IsValidRelativeRecordName(record.Name) {
 		return fmt.Errorf("%w: invalid record name %q", ErrInvalidLabel, record.Name)
 	}
 
@@ -74,139 +111,204 @@ func ValidateRecord(record Record, zoneDomain string) error {
 	if record.TTL < 0 {
 		return fmt.Errorf("TTL cannot be negative")
 	}
-	if record.TTL > 0 && record.TTL < 300 {
-		return fmt.Errorf("TTL should be at least 300 seconds")
+	if record.TTL > 0 && record.TTL < MinRecordTTL {
+		return fmt.Errorf("TTL should be at least %d seconds", MinRecordTTL)
 	}
 
-	switch record.Type {
-	case TypeA:
-		ip := net.ParseIP(record.Value)
-		if ip == nil || ip.To4() == nil {
-			return ErrInvalidIPv4
-		}
-	case TypeAAAA:
-		ip := net.ParseIP(record.Value)
-		if ip == nil || ip.To4() != nil {
-			return ErrInvalidIPv6
-		}
-	case TypeCNAME:
-		if record.Name == "@" {
-			return ErrCNAMEAtApex
-		}
-		if !isValidFQDN(record.Value) {
-			return fmt.Errorf("%w: invalid CNAME target %q", ErrInvalidDomain, record.Value)
-		}
-	case TypeMX:
-		if record.Priority < 0 || record.Priority > 65535 {
-			return ErrInvalidMXPriority
-		}
-		if !isValidFQDN(record.Value) {
-			return fmt.Errorf("%w: invalid MX target %q", ErrInvalidDomain, record.Value)
-		}
-	case TypeTXT:
-		if len(record.Value) > 255 {
-			return ErrTXTTooLong
-		}
-	case TypeNS:
-		if !isValidFQDN(record.Value) {
-			return fmt.Errorf("%w: invalid NS target %q", ErrInvalidDomain, record.Value)
-		}
-	case TypeSOA:
-		// SOA has multiple fields - basic validation
-		if record.Value == "" {
-			return fmt.Errorf("SOA requires value")
-		}
-	case TypeSRV:
-		if record.Priority < 0 || record.Priority > 65535 {
-			return ErrInvalidMXPriority
-		}
-		if record.Weight < 0 || record.Weight > 65535 {
-			return fmt.Errorf("SRV weight must be 0-65535")
-		}
-		if record.Port < 0 || record.Port > 65535 {
-			return fmt.Errorf("SRV port must be 0-65535")
-		}
-		if !isValidFQDN(record.Value) {
-			return fmt.Errorf("%w: invalid SRV target %q", ErrInvalidDomain, record.Value)
-		}
-	case TypePTR:
-		// Value must not be an IP address — common mistake (PTR points to hostname, not IP)
-		if net.ParseIP(record.Value) != nil {
-			return fmt.Errorf("%w: value must be a hostname, not an IP address", ErrInvalidPTR)
-		}
-		if !isValidFQDN(record.Value) {
-			return fmt.Errorf("%w: invalid PTR target name %q", ErrInvalidDomain, record.Value)
-		}
-		// In in-addr.arpa zones: name must be @ or a number 0-255 (last IP octet)
-		if strings.HasSuffix(zoneDomain, "in-addr.arpa") && record.Name != "@" {
-			if !isValidIPv4Octet(record.Name) {
-				return fmt.Errorf("%w: name in in-addr.arpa must be a number 0-255, not %q", ErrInvalidPTR, record.Name)
-			}
-		}
-		// In ip6.arpa zones: name must be @ or a hex nibble (0-9, a-f)
-		if strings.HasSuffix(zoneDomain, "ip6.arpa") && record.Name != "@" {
-			if !isValidIPv6Nibble(record.Name) {
-				return fmt.Errorf("%w: name in ip6.arpa must be a hex nibble (0-9 or a-f), not %q", ErrInvalidPTR, record.Name)
-			}
-		}
-	case TypeCAA:
-		// Tag: issue, issuewild, iodef. Priority: flags 0-255. Value: CA domain or iodef URL
-		if record.Value == "" {
-			return ErrInvalidCAA
-		}
-		tag := strings.ToLower(strings.TrimSpace(record.Tag))
-		if tag == "" || (tag != "issue" && tag != "issuewild" && tag != "iodef") {
-			return fmt.Errorf("%w: tag must be issue, issuewild, or iodef", ErrInvalidCAA)
-		}
-		if record.Priority < 0 || record.Priority > 255 {
-			return fmt.Errorf("CAA flags must be 0-255")
-		}
-		if len(record.Value) > 255 {
-			return ErrTXTTooLong
-		}
-	case TypeDNAME:
-		if record.Name == "@" {
-			return fmt.Errorf("DNAME not allowed at zone apex")
-		}
-		if !isValidFQDN(record.Value) {
-			return fmt.Errorf("%w: invalid DNAME target %q", ErrInvalidDomain, record.Value)
-		}
-	case TypeSPF:
-		if len(record.Value) > 255 {
-			return ErrTXTTooLong
-		}
-	case TypeURI:
-		if record.Priority < 0 || record.Priority > 65535 {
-			return ErrInvalidMXPriority
-		}
-		if record.Value == "" || !isValidURI(record.Value) {
-			return ErrInvalidURI
-		}
-	case TypeALIAS:
-		if !isValidFQDN(record.Value) {
-			return fmt.Errorf("%w: invalid ALIAS target %q", ErrInvalidDomain, record.Value)
-		}
-	case TypeFWD:
-		if record.Name != "@" {
-			return fmt.Errorf("FWD record must be at zone apex (@)")
-		}
-		if record.Value == "" {
-			return ErrInvalidFWD
-		}
-		for _, s := range strings.Split(record.Value, ",") {
-			s = strings.TrimSpace(s)
-			host, _, err := net.SplitHostPort(s)
-			if err != nil {
-				host = s
-			}
-			if net.ParseIP(host) == nil && !isValidFQDN(host) {
-				return fmt.Errorf("%w: invalid server %q", ErrInvalidFWD, s)
-			}
-		}
-	default:
+	validate, ok := recordValidators[record.Type]
+	if !ok {
 		return fmt.Errorf("unsupported record type: %s", record.Type)
 	}
+	return validate(record, zoneDomain)
+}
 
+// recordValidators holds one type-specific validation function per record
+// type, keyed by Record.Type. Each entry does exactly one type's checks;
+// ValidateRecord only dispatches to them after the shared name/TTL checks.
+var recordValidators = map[RecordType]func(Record, string) error{
+	TypeA:     validateARecord,
+	TypeAAAA:  validateAAAARecord,
+	TypeCNAME: validateCNAMERecord,
+	TypeMX:    validateMXRecord,
+	TypeTXT:   validateTXTRecord,
+	TypeNS:    validateNSRecord,
+	TypeSOA:   validateSOARecord,
+	TypeSRV:   validateSRVRecord,
+	TypePTR:   validatePTRRecord,
+	TypeCAA:   validateCAARecord,
+	TypeDNAME: validateDNAMERecord,
+	TypeSPF:   validateSPFRecord,
+	TypeURI:   validateURIRecord,
+	TypeALIAS: validateALIASRecord,
+	TypeFWD:   validateFWDRecord,
+}
+
+func validateARecord(record Record, _ string) error {
+	ip := net.ParseIP(record.Value)
+	if ip == nil || ip.To4() == nil {
+		return ErrInvalidIPv4
+	}
+	return nil
+}
+
+func validateAAAARecord(record Record, _ string) error {
+	ip := net.ParseIP(record.Value)
+	if ip == nil || ip.To4() != nil {
+		return ErrInvalidIPv6
+	}
+	return nil
+}
+
+func validateCNAMERecord(record Record, _ string) error {
+	if record.Name == "@" {
+		return ErrCNAMEAtApex
+	}
+	if !isValidFQDN(record.Value) {
+		return fmt.Errorf("%w: invalid CNAME target %q", ErrInvalidDomain, record.Value)
+	}
+	return nil
+}
+
+func validateMXRecord(record Record, _ string) error {
+	if record.Priority < 0 || record.Priority > 65535 {
+		return ErrInvalidMXPriority
+	}
+	if !isValidFQDN(record.Value) {
+		return fmt.Errorf("%w: invalid MX target %q", ErrInvalidDomain, record.Value)
+	}
+	return nil
+}
+
+func validateTXTRecord(record Record, _ string) error {
+	if len(record.Value) > 255 {
+		return ErrTXTTooLong
+	}
+	return nil
+}
+
+func validateNSRecord(record Record, _ string) error {
+	if !isValidFQDN(record.Value) {
+		return fmt.Errorf("%w: invalid NS target %q", ErrInvalidDomain, record.Value)
+	}
+	return nil
+}
+
+// validateSOARecord: SOA has multiple fields - basic validation.
+func validateSOARecord(record Record, _ string) error {
+	if record.Value == "" {
+		return fmt.Errorf("SOA requires value")
+	}
+	return nil
+}
+
+func validateSRVRecord(record Record, _ string) error {
+	if record.Priority < 0 || record.Priority > 65535 {
+		return ErrInvalidMXPriority
+	}
+	if record.Weight < 0 || record.Weight > 65535 {
+		return fmt.Errorf("SRV weight must be 0-65535")
+	}
+	if record.Port < 0 || record.Port > 65535 {
+		return fmt.Errorf("SRV port must be 0-65535")
+	}
+	if !isValidFQDN(record.Value) {
+		return fmt.Errorf("%w: invalid SRV target %q", ErrInvalidDomain, record.Value)
+	}
+	return nil
+}
+
+func validatePTRRecord(record Record, zoneDomain string) error {
+	// Value must not be an IP address — common mistake (PTR points to hostname, not IP)
+	if net.ParseIP(record.Value) != nil {
+		return fmt.Errorf("%w: value must be a hostname, not an IP address", ErrInvalidPTR)
+	}
+	if !isValidFQDN(record.Value) {
+		return fmt.Errorf("%w: invalid PTR target name %q", ErrInvalidDomain, record.Value)
+	}
+	// In in-addr.arpa zones: name must be @ or a number 0-255 (last IP octet)
+	if strings.HasSuffix(zoneDomain, "in-addr.arpa") && record.Name != "@" {
+		if !isValidIPv4Octet(record.Name) {
+			return fmt.Errorf("%w: name in in-addr.arpa must be a number 0-255, not %q", ErrInvalidPTR, record.Name)
+		}
+	}
+	// In ip6.arpa zones: name must be @ or a hex nibble (0-9, a-f)
+	if strings.HasSuffix(zoneDomain, "ip6.arpa") && record.Name != "@" {
+		if !isValidIPv6Nibble(record.Name) {
+			return fmt.Errorf("%w: name in ip6.arpa must be a hex nibble (0-9 or a-f), not %q", ErrInvalidPTR, record.Name)
+		}
+	}
+	return nil
+}
+
+// validateCAARecord: Tag: issue, issuewild, iodef. Priority: flags 0-255. Value: CA domain or iodef URL.
+func validateCAARecord(record Record, _ string) error {
+	if record.Value == "" {
+		return ErrInvalidCAA
+	}
+	tag := strings.ToLower(strings.TrimSpace(record.Tag))
+	if tag == "" || (tag != "issue" && tag != "issuewild" && tag != "iodef") {
+		return fmt.Errorf("%w: tag must be issue, issuewild, or iodef", ErrInvalidCAA)
+	}
+	if record.Priority < 0 || record.Priority > 255 {
+		return fmt.Errorf("CAA flags must be 0-255")
+	}
+	if len(record.Value) > 255 {
+		return ErrTXTTooLong
+	}
+	return nil
+}
+
+func validateDNAMERecord(record Record, _ string) error {
+	if record.Name == "@" {
+		return fmt.Errorf("DNAME not allowed at zone apex")
+	}
+	if !isValidFQDN(record.Value) {
+		return fmt.Errorf("%w: invalid DNAME target %q", ErrInvalidDomain, record.Value)
+	}
+	return nil
+}
+
+func validateSPFRecord(record Record, _ string) error {
+	if len(record.Value) > 255 {
+		return ErrTXTTooLong
+	}
+	return nil
+}
+
+func validateURIRecord(record Record, _ string) error {
+	if record.Priority < 0 || record.Priority > 65535 {
+		return ErrInvalidMXPriority
+	}
+	if record.Value == "" || !isValidURI(record.Value) {
+		return ErrInvalidURI
+	}
+	return nil
+}
+
+func validateALIASRecord(record Record, _ string) error {
+	if !isValidFQDN(record.Value) {
+		return fmt.Errorf("%w: invalid ALIAS target %q", ErrInvalidDomain, record.Value)
+	}
+	return nil
+}
+
+func validateFWDRecord(record Record, _ string) error {
+	if record.Name != "@" {
+		return fmt.Errorf("FWD record must be at zone apex (@)")
+	}
+	if record.Value == "" {
+		return ErrInvalidFWD
+	}
+	for _, s := range strings.Split(record.Value, ",") {
+		s = strings.TrimSpace(s)
+		host, _, err := net.SplitHostPort(s)
+		if err != nil {
+			host = s
+		}
+		if net.ParseIP(host) == nil && !isValidFQDN(host) {
+			return fmt.Errorf("%w: invalid server %q", ErrInvalidFWD, s)
+		}
+	}
 	return nil
 }
 
@@ -278,18 +380,9 @@ func isValidHostname(s string) bool {
 	if len(s) == 0 || len(s) > 253 {
 		return false
 	}
-	labels := strings.Split(s, ".")
-	for _, label := range labels {
-		if len(label) == 0 || len(label) > 63 {
+	for _, label := range strings.Split(s, ".") {
+		if !isValidLabel(label, true) {
 			return false
-		}
-		if label[0] == '-' || label[len(label)-1] == '-' {
-			return false
-		}
-		for _, c := range label {
-			if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '*') {
-				return false
-			}
 		}
 	}
 	return true
@@ -301,18 +394,9 @@ func IsValidDomain(s string) bool {
 	if len(s) == 0 || len(s) > 253 {
 		return false
 	}
-	labels := strings.Split(s, ".")
-	for _, label := range labels {
-		if len(label) == 0 || len(label) > 63 {
+	for _, label := range strings.Split(s, ".") {
+		if !isValidLabel(label, false) {
 			return false
-		}
-		if label[0] == '-' || label[len(label)-1] == '-' {
-			return false
-		}
-		for _, c := range label {
-			if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '*') {
-				return false
-			}
 		}
 	}
 	return true

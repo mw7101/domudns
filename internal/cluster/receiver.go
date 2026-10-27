@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	"bytes"
 	"compress/gzip"
 	"context"
 	"encoding/base64"
@@ -28,6 +29,19 @@ type ReloadCallbacks struct {
 	AuthReloader func() error
 	// DDNSKeyReloader is called after TSIG key events (nil = no reload).
 	DDNSKeyReloader func() error
+	// ClientGroupsReloader is called after client group events (nil = no reload).
+	ClientGroupsReloader func() error
+	// TLSReloader is called after EventTLSCert to hot-reload the TLS certificate.
+	TLSReloader func() error
+	// BlocklistURLDomainsUpdater is called after EventURLDomains for a fast in-memory update.
+	// When set, replaces triggerBlocklistReload() for URL domain events (no disk I/O).
+	// Falls back to BlocklistReloader when nil.
+	BlocklistURLDomainsUpdater func(urlID int, category string, domains []string)
+
+	// scheduler, when set by WithSharedReloadScheduler, serializes and coalesces
+	// reload callbacks of the same kind across the poll loop and this receiver.
+	// Unexported: it is wired once when building the ReloadCallbacks value.
+	scheduler *reloadScheduler
 }
 
 // replayWindowSec is the maximum age difference (seconds) allowed between
@@ -149,6 +163,10 @@ func (h *ReceiverHandler) applyEvent(ctx context.Context, req SyncRequest) error
 		return h.applyTSIGKeys(ctx, req.Data)
 	case EventAPIKeys:
 		return h.applyAPIKeys(ctx, req.Data)
+	case EventClientGroups:
+		return h.applyClientGroups(ctx, req.Data)
+	case EventTLSCert:
+		return h.applyTLSCert(ctx, req.Data)
 	default:
 		log.Warn().Str("event", string(req.Type)).Msg("cluster: unknown event type, ignoring")
 		return nil
@@ -241,6 +259,59 @@ func (h *ReceiverHandler) applyWhitelistIPs(ctx context.Context, data json.RawMe
 // maxDecompressedSize limits decompressed blocklist data to 16 MB (protection against ZIP bombs).
 const maxDecompressedSize = 16 * 1024 * 1024
 
+// decodeDomainsGz decompresses gzip bytes into a cleaned, newline-separated
+// domain list. The decompressed size is bounded to guard against ZIP bombs.
+func decodeDomainsGz(gzBytes []byte) ([]string, error) {
+	gr, err := gzip.NewReader(bytes.NewReader(gzBytes))
+	if err != nil {
+		return nil, fmt.Errorf("gzip reader: %w", err)
+	}
+	defer func() { _ = gr.Close() }()
+	rawBytes, err := io.ReadAll(io.LimitReader(gr, maxDecompressedSize))
+	if err != nil {
+		return nil, fmt.Errorf("gzip read: %w", err)
+	}
+	lines := strings.Split(string(rawBytes), "\n")
+	cleaned := make([]string, 0, len(lines))
+	for _, d := range lines {
+		d = strings.TrimSpace(d)
+		if d != "" {
+			cleaned = append(cleaned, d)
+		}
+	}
+	return cleaned, nil
+}
+
+// urlCategory returns the category of a blocklist URL, or "" if unknown.
+func urlCategory(ctx context.Context, fs *filestore.FileStore, urlID int) string {
+	urls, err := fs.ListBlocklistURLs(ctx)
+	if err != nil {
+		return ""
+	}
+	for _, u := range urls {
+		if u.ID == urlID {
+			return u.Category
+		}
+	}
+	return ""
+}
+
+// applyURLDomainsToStore persists a URL's domains and refreshes the running
+// blocklist via the in-memory updater, or a full reload as a fallback.
+func applyURLDomainsToStore(ctx context.Context, fs *filestore.FileStore, callbacks ReloadCallbacks, urlID int, category string, domains []string) error {
+	if err := fs.SetBlocklistURLDomains(ctx, urlID, domains); err != nil {
+		return fmt.Errorf("set url domains: %w", err)
+	}
+	if callbacks.BlocklistURLDomainsUpdater != nil {
+		callbacks.BlocklistURLDomainsUpdater(urlID, category, domains)
+	} else if callbacks.BlocklistReloader != nil {
+		callbacks.trigger(true, func() error {
+			return runReloadWithTimeout(callbacks.BlocklistReloader, "blocklist")
+		}, "blocklist")
+	}
+	return nil
+}
+
 func (h *ReceiverHandler) applyURLDomains(ctx context.Context, data json.RawMessage) error {
 	var payload URLDomainsPayload
 	if err := json.Unmarshal(data, &payload); err != nil {
@@ -251,28 +322,11 @@ func (h *ReceiverHandler) applyURLDomains(ctx context.Context, data json.RawMess
 	if err != nil {
 		return fmt.Errorf("base64 decode: %w", err)
 	}
-	gr, err := gzip.NewReader(strings.NewReader(string(gzBytes)))
+	domains, err := decodeDomainsGz(gzBytes)
 	if err != nil {
-		return fmt.Errorf("gzip reader: %w", err)
+		return err
 	}
-	defer gr.Close()
-	rawBytes, err := io.ReadAll(io.LimitReader(gr, maxDecompressedSize))
-	if err != nil {
-		return fmt.Errorf("gzip read: %w", err)
-	}
-	domains := strings.Split(string(rawBytes), "\n")
-	cleaned := make([]string, 0, len(domains))
-	for _, d := range domains {
-		d = strings.TrimSpace(d)
-		if d != "" {
-			cleaned = append(cleaned, d)
-		}
-	}
-	if err := h.store.SetBlocklistURLDomains(ctx, payload.URLID, cleaned); err != nil {
-		return fmt.Errorf("set url domains: %w", err)
-	}
-	h.triggerBlocklistReload()
-	return nil
+	return applyURLDomainsToStore(ctx, h.store, h.callbacks, payload.URLID, h.lookupURLCategory(ctx, payload.URLID), domains)
 }
 
 func (h *ReceiverHandler) applyAuthConfig(ctx context.Context, data json.RawMessage) error {
@@ -284,11 +338,9 @@ func (h *ReceiverHandler) applyAuthConfig(ctx context.Context, data json.RawMess
 		return fmt.Errorf("update auth: %w", err)
 	}
 	if h.callbacks.AuthReloader != nil {
-		go func() {
-			if err := h.callbacks.AuthReloader(); err != nil {
-				log.Warn().Err(err).Msg("cluster: auth reload failed")
-			}
-		}()
+		h.callbacks.trigger(true, func() error {
+			return runReloadWithTimeout(h.callbacks.AuthReloader, "auth")
+		}, "auth")
 	}
 	return nil
 }
@@ -322,11 +374,9 @@ func (h *ReceiverHandler) applyTSIGKeys(ctx context.Context, data json.RawMessag
 		return fmt.Errorf("set tsig keys: %w", err)
 	}
 	if h.callbacks.DDNSKeyReloader != nil {
-		go func() {
-			if err := h.callbacks.DDNSKeyReloader(); err != nil {
-				log.Warn().Err(err).Msg("cluster: ddns key reload failed")
-			}
-		}()
+		h.callbacks.trigger(true, func() error {
+			return runReloadWithTimeout(h.callbacks.DDNSKeyReloader, "ddns key")
+		}, "ddns key")
 	}
 	return nil
 }
@@ -340,6 +390,48 @@ func (h *ReceiverHandler) applyAPIKeys(ctx context.Context, data json.RawMessage
 		return fmt.Errorf("set api keys: %w", err)
 	}
 	return nil
+}
+
+func (h *ReceiverHandler) applyClientGroups(ctx context.Context, data json.RawMessage) error {
+	var groups []*dns.ClientGroup
+	if err := json.Unmarshal(data, &groups); err != nil {
+		return fmt.Errorf("unmarshal client groups: %w", err)
+	}
+	if err := h.store.SetClientGroups(ctx, groups); err != nil {
+		return fmt.Errorf("store client groups: %w", err)
+	}
+	h.triggerClientGroupsReload()
+	return nil
+}
+
+func (h *ReceiverHandler) applyTLSCert(ctx context.Context, data json.RawMessage) error {
+	var payload store.TLSCertPayload
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return fmt.Errorf("unmarshal tls cert: %w", err)
+	}
+	if err := h.store.SetTLSCert(ctx, &payload); err != nil {
+		return fmt.Errorf("store tls cert: %w", err)
+	}
+	h.triggerTLSReload()
+	return nil
+}
+
+func (h *ReceiverHandler) triggerTLSReload() {
+	if h.callbacks.TLSReloader == nil {
+		return
+	}
+	h.callbacks.trigger(true, func() error {
+		return runReloadWithTimeout(h.callbacks.TLSReloader, "tls")
+	}, "tls")
+}
+
+func (h *ReceiverHandler) triggerClientGroupsReload() {
+	if h.callbacks.ClientGroupsReloader == nil {
+		return
+	}
+	h.callbacks.trigger(true, func() error {
+		return runReloadWithTimeout(h.callbacks.ClientGroupsReloader, "client groups")
+	}, "client groups")
 }
 
 // checkAndStoreNonce verifies that nonce has not been seen before and records it.
@@ -367,42 +459,42 @@ func (h *ReceiverHandler) checkAndStoreNonce(nonce string) error {
 // reloadTimeout limits the maximum time for an async reload callback.
 const reloadTimeout = 30 * time.Second
 
+// runReloadWithTimeout runs fn bounded by reloadTimeout. It returns an error on
+// timeout (instead of only logging) so a hung reload never wedges the shared
+// reload scheduler for that kind.
+func runReloadWithTimeout(fn func() error, name string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), reloadTimeout)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- fn() }()
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		return fmt.Errorf("%s reload timed out after %s", name, reloadTimeout)
+	}
+}
+
 func (h *ReceiverHandler) triggerZoneReload() {
 	if h.callbacks.ZoneReloader == nil {
 		return
 	}
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), reloadTimeout)
-		defer cancel()
-		done := make(chan error, 1)
-		go func() { done <- h.callbacks.ZoneReloader() }()
-		select {
-		case err := <-done:
-			if err != nil {
-				log.Warn().Err(err).Msg("cluster: zone reload failed")
-			}
-		case <-ctx.Done():
-			log.Error().Msg("cluster: zone reload timed out")
-		}
-	}()
+	h.callbacks.trigger(true, func() error {
+		return runReloadWithTimeout(h.callbacks.ZoneReloader, "zone")
+	}, "zone")
+}
+
+// lookupURLCategory returns the category for a blocklist URL from the local store.
+// Returns "" on error or if the URL is not found.
+func (h *ReceiverHandler) lookupURLCategory(ctx context.Context, urlID int) string {
+	return urlCategory(ctx, h.store, urlID)
 }
 
 func (h *ReceiverHandler) triggerBlocklistReload() {
 	if h.callbacks.BlocklistReloader == nil {
 		return
 	}
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), reloadTimeout)
-		defer cancel()
-		done := make(chan error, 1)
-		go func() { done <- h.callbacks.BlocklistReloader() }()
-		select {
-		case err := <-done:
-			if err != nil {
-				log.Warn().Err(err).Msg("cluster: blocklist reload failed")
-			}
-		case <-ctx.Done():
-			log.Error().Msg("cluster: blocklist reload timed out")
-		}
-	}()
+	h.callbacks.trigger(true, func() error {
+		return runReloadWithTimeout(h.callbacks.BlocklistReloader, "blocklist")
+	}, "blocklist")
 }

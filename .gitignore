@@ -19,9 +19,14 @@ dashboard/out/
 # Web-Assets (werden von build-dashboard generiert, nicht committen)
 internal/caddy/web/*
 
+# macOS Finder-Metadaten (auch in Unterordnern)
+.DS_Store
+
 # MCP-Konfiguration (lokale Entwicklungstools, nicht ins Repo)
 .mcp.json
 
 .superpowers/*.*
 .superpowers/*/*
 
+.worktrees/
+.anonymize

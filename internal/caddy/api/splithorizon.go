@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"net/http"
 
 	"github.com/mw7101/domudns/internal/config"
@@ -99,29 +98,4 @@ func (h *SplitHorizonHandler) put(w http.ResponseWriter, r *http.Request) {
 		Msg("split-horizon config updated")
 
 	writeSuccess(w, newCfg, http.StatusOK)
-}
-
-// splitHorizonConfigFromOverrides extracts SplitHorizonConfig from config overrides.
-func splitHorizonConfigFromOverrides(overrides map[string]interface{}) (config.SplitHorizonConfig, bool) {
-	var cfg config.SplitHorizonConfig
-	dnsRaw, ok := overrides["dnsserver"]
-	if !ok {
-		return cfg, false
-	}
-	dnsMap, ok := dnsRaw.(map[string]interface{})
-	if !ok {
-		return cfg, false
-	}
-	shRaw, ok := dnsMap["split_horizon"]
-	if !ok {
-		return cfg, false
-	}
-	data, err := json.Marshal(shRaw)
-	if err != nil {
-		return cfg, false
-	}
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return cfg, false
-	}
-	return cfg, true
 }

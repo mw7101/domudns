@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation'
 import { MovingBorderButton } from '@/components/ui/moving-border'
 import { motion } from 'framer-motion'
 import { DomULogoIcon } from '@/components/layout/DomULogo'
+import { setup, setApiKey as persistApiKey } from '@/lib/api'
+import { getErrorMessage } from '@/lib/utils'
 
 export default function SetupPage() {
   const router = useRouter()
@@ -31,26 +33,15 @@ export default function SetupPage() {
 
     setLoading(true)
     try {
-      const res = await fetch('/api/setup/complete', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password, generate_api_key: generateKey }),
-      })
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) {
-        setError(data?.error?.message ?? 'Setup fehlgeschlagen.')
-        return
-      }
+      const data = await setup.complete({ username, password, generate_api_key: generateKey })
       if (data.api_key) {
+        persistApiKey(data.api_key)
         setApiKey(data.api_key)
-        if (typeof window !== 'undefined') {
-          localStorage.setItem('dns-stack-api-key', data.api_key)
-        }
       } else {
         router.push('/login/')
       }
-    } catch {
-      setError('Verbindungsfehler.')
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, 'Setup fehlgeschlagen.'))
     } finally {
       setLoading(false)
     }

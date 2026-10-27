@@ -33,6 +33,10 @@ const (
 	EventTSIGKeys SyncEventType = "tsig_keys"
 	// EventAPIKeys: data = []store.NamedAPIKey (including Key field for validation on slaves)
 	EventAPIKeys SyncEventType = "api_keys"
+	// EventClientGroups: data = []*dns.ClientGroup
+	EventClientGroups SyncEventType = "client_groups"
+	// EventTLSCert: data = store.TLSCertPayload (cert + key PEM, NEVER LOG KeyPEM)
+	EventTLSCert SyncEventType = "tls_cert"
 )
 
 // SyncRequest is the HTTP body for POST /api/internal/sync.
@@ -62,5 +66,13 @@ type MasterStateResponse struct {
 	BlocklistPatterns json.RawMessage `json:"blocklist_patterns"` // []store.BlocklistPattern
 	TSIGKeys          json.RawMessage `json:"tsig_keys"`          // []store.TSIGKey
 	NamedAPIKeys      json.RawMessage `json:"named_api_keys"`     // []store.NamedAPIKey (with Key field)
+	ClientGroups      json.RawMessage `json:"client_groups"`      // []*dns.ClientGroup
+	TLSACMEConfig     json.RawMessage `json:"tls_acme_config"`    // store.TLSACMEConfig
+	TLSCert           json.RawMessage `json:"tls_cert"`           // store.TLSCertPayload (incl. KeyPEM)
+	// URLDomainsMeta carries {url_id, sha256} for each per-URL domain set.
+	// The lists themselves are too large for the state response and are
+	// transferred via EventURLDomains; this metadata lets a slave detect a
+	// lost push and pull only the stale/missing sets.
+	URLDomainsMeta json.RawMessage `json:"url_domains_meta"`
 	// URLDomains is transmitted separately via EventURLDomains (too large for state response)
 }

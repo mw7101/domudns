@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -57,7 +58,9 @@ func sanitizeIP(s string) string {
 // MaxBytesMiddleware limits request body size for methods that accept a body.
 func MaxBytesMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Body != nil {
+		// /api/internal/* carries large cluster sync payloads secured via HMAC-SHA256.
+		// The receiver already enforces its own 16 MB limit — skip the API body cap here.
+		if r.Body != nil && !strings.HasPrefix(r.URL.Path, "/api/internal/") {
 			r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
 		}
 		next.ServeHTTP(w, r)
@@ -132,6 +135,8 @@ func RateLimitMiddleware(ctx context.Context, requestsPerMinute int, trustProxy 
 // Order of checks:
 //  1. Session cookie (browser after login via /login)
 //  2. Bearer token (programmatic access: curl, scripts)
+//  3. HTTP Basic (password = named API key, for Traefik httpreq provider)
+//  4. X-API-Key header (PowerDNS API convention, for PowerDNS-compat clients)
 //
 // On missing/invalid auth:
 //   - Browser requests (Accept: text/html) → redirect to /login
@@ -165,9 +170,25 @@ func AuthMiddleware(auth *AuthManager, sessions *SessionManager, next http.Handl
 			return
 		}
 
+		// 4. Check X-API-Key header (PowerDNS API convention). Applies to
+		// every endpoint, not just /api/pdns/*, since real PowerDNS clients
+		// (Proxmox VE plugin, acme.sh dns_pdns) send only this header.
+		if key := strings.TrimSpace(r.Header.Get("X-API-Key")); key != "" {
+			if auth.ValidateAnyKey(r.Context(), key) {
+				next.ServeHTTP(w, r)
+				return
+			}
+			writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "Unauthorized")
+			return
+		}
+
 		// No valid auth method → redirect browser to login page, API gets 401
 		if strings.Contains(r.Header.Get("Accept"), "text/html") {
-			http.Redirect(w, r, "/login?redirect="+r.URL.RequestURI(), http.StatusSeeOther)
+			redirectPath := r.URL.Path
+			if !isSafeRedirect(redirectPath) {
+				redirectPath = "/"
+			}
+			http.Redirect(w, r, "/login?redirect="+url.QueryEscape(redirectPath), http.StatusSeeOther)
 			return
 		}
 		writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "Unauthorized")

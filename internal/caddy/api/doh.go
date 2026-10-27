@@ -40,39 +40,11 @@ func NewDoHHandler(handler dns.Handler, path string) *DoHHandler {
 
 // ServeHTTP implements http.Handler.
 func (h *DoHHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	var wireQuery []byte
-	var err error
-
-	switch r.Method {
-	case http.MethodGet:
-		wireQuery, err = h.decodeGET(r)
-		if err != nil {
-			log.Debug().Err(err).Msg("doh: invalid GET query")
-			http.Error(w, "Bad Request: "+err.Error(), http.StatusBadRequest)
-			return
-		}
-
-	case http.MethodPost:
-		ct := r.Header.Get("Content-Type")
-		// Only check Content-Type if provided; some clients omit it.
-		if ct != "" && !strings.HasPrefix(ct, dohContentType) {
-			http.Error(w, "Unsupported Media Type: expected application/dns-message", http.StatusUnsupportedMediaType)
-			return
-		}
-		wireQuery, err = h.decodePOST(r)
-		if err != nil {
-			log.Debug().Err(err).Msg("doh: invalid POST body")
-			http.Error(w, "Bad Request: "+err.Error(), http.StatusBadRequest)
-			return
-		}
-
-	default:
-		w.Header().Set("Allow", "GET, POST")
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+	wireQuery, ok := h.decodeRequest(w, r)
+	if !ok {
 		return
 	}
 
-	// Parse DNS message
 	query := new(dns.Msg)
 	if err := query.Unpack(wireQuery); err != nil {
 		log.Debug().Err(err).Msg("doh: failed to unpack DNS message")
@@ -80,35 +52,74 @@ func (h *DoHHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Determine client IP for query logging
-	clientAddr := dohClientAddr(r)
+	respMsg := h.resolve(query, dohClientAddr(r))
 
-	// Intercept response via httpDNSWriter
-	rw := &httpDNSWriter{
-		remoteAddr: clientAddr,
-		localAddr:  &net.TCPAddr{IP: net.IPv4zero, Port: 443},
-	}
-
-	h.handler.ServeDNS(rw, query)
-
-	if rw.msg == nil {
-		// No WriteMsg called — send SERVFAIL
-		resp := new(dns.Msg)
-		resp.SetRcode(query, dns.RcodeServerFailure)
-		rw.msg = resp
-	}
-
-	// Encode DNS response in wire format
-	wireResp, err := rw.msg.Pack()
+	wireResp, err := respMsg.Pack()
 	if err != nil {
 		log.Error().Err(err).Msg("doh: failed to pack DNS response")
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
 
-	// Cache-Control: min(TTL) of all response RRs; at least 0
-	maxAge := minTTL(rw.msg)
+	writeDoHResponse(w, respMsg, wireResp)
+}
 
+// decodeRequest reads and decodes the DNS wire-format query from the
+// request — GET's base64url ?dns= parameter or POST's raw body — writing
+// the error response itself on failure.
+func (h *DoHHandler) decodeRequest(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
+	switch r.Method {
+	case http.MethodGet:
+		wireQuery, err := h.decodeGET(r)
+		if err != nil {
+			log.Debug().Err(err).Msg("doh: invalid GET query")
+			http.Error(w, "Bad Request: "+err.Error(), http.StatusBadRequest)
+			return nil, false
+		}
+		return wireQuery, true
+
+	case http.MethodPost:
+		ct := r.Header.Get("Content-Type")
+		// Only check Content-Type if provided; some clients omit it.
+		if ct != "" && !strings.HasPrefix(ct, dohContentType) {
+			http.Error(w, "Unsupported Media Type: expected application/dns-message", http.StatusUnsupportedMediaType)
+			return nil, false
+		}
+		wireQuery, err := h.decodePOST(r)
+		if err != nil {
+			log.Debug().Err(err).Msg("doh: invalid POST body")
+			http.Error(w, "Bad Request: "+err.Error(), http.StatusBadRequest)
+			return nil, false
+		}
+		return wireQuery, true
+
+	default:
+		w.Header().Set("Allow", "GET, POST")
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return nil, false
+	}
+}
+
+// resolve runs query through the wrapped dns.Handler and returns its
+// response, synthesizing SERVFAIL if the handler never called WriteMsg.
+func (h *DoHHandler) resolve(query *dns.Msg, clientAddr net.Addr) *dns.Msg {
+	rw := &httpDNSWriter{
+		remoteAddr: clientAddr,
+		localAddr:  &net.TCPAddr{IP: net.IPv4zero, Port: 443},
+	}
+	h.handler.ServeDNS(rw, query)
+	if rw.msg == nil {
+		resp := new(dns.Msg)
+		resp.SetRcode(query, dns.RcodeServerFailure)
+		return resp
+	}
+	return rw.msg
+}
+
+// writeDoHResponse writes the packed DNS response with RFC 8484 headers.
+// Cache-Control is min(TTL) of all response RRs; no-cache when that's 0.
+func writeDoHResponse(w http.ResponseWriter, msg *dns.Msg, wireResp []byte) {
+	maxAge := minTTL(msg)
 	w.Header().Set("Content-Type", dohContentType)
 	if maxAge > 0 {
 		w.Header().Set("Cache-Control", "max-age="+itoa(maxAge))

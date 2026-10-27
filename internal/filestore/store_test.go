@@ -17,7 +17,7 @@ func newTestStore(t *testing.T) (*filestore.FileStore, string) {
 	t.Helper()
 	dir, err := os.MkdirTemp("", "filestore-test-*")
 	require.NoError(t, err)
-	t.Cleanup(func() { os.RemoveAll(dir) })
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	fs, err := filestore.NewFileStore(dir)
 	require.NoError(t, err)
 	return fs, dir
@@ -180,7 +180,7 @@ func TestFileStore_Blocklist(t *testing.T) {
 	fs, _ := newTestStore(t)
 
 	// AddBlocklistURL
-	u, err := fs.AddBlocklistURL(ctx, "https://example.com/list.txt", true)
+	u, err := fs.AddBlocklistURL(ctx, "https://example.com/list.txt", "", true)
 	require.NoError(t, err)
 	assert.Equal(t, 1, u.ID)
 
@@ -275,7 +275,7 @@ func TestFileStore_URLFetchUpdate(t *testing.T) {
 	ctx := context.Background()
 	fs, _ := newTestStore(t)
 
-	u, err := fs.AddBlocklistURL(ctx, "https://example.com/list.txt", true)
+	u, err := fs.AddBlocklistURL(ctx, "https://example.com/list.txt", "", true)
 	require.NoError(t, err)
 
 	// UpdateBlocklistURLFetch - success

@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/mw7101/domudns/internal/dns"
 )
 
 // atomicWriteJSON serializes v as JSON and writes it atomically to path.
@@ -65,6 +67,38 @@ func readJSON(path string, v interface{}) error {
 	return nil
 }
 
+// atomicWriteBytes writes raw bytes atomically to path (temp-file + os.Rename).
+func atomicWriteBytes(path string, data []byte) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return fmt.Errorf("mkdir %s: %w", dir, err)
+	}
+	tmp, err := os.CreateTemp(dir, ".tmp-")
+	if err != nil {
+		return fmt.Errorf("create temp: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer func() {
+		_ = tmp.Close()
+		if _, err := os.Stat(tmpPath); err == nil {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+	if _, err := tmp.Write(data); err != nil {
+		return fmt.Errorf("write: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		return fmt.Errorf("sync: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close temp: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("rename: %w", err)
+	}
+	return nil
+}
+
 // writeGzipDomains writes domains gzip-compressed as newline-separated strings.
 func writeGzipDomains(path string, domains []string) error {
 	dir := filepath.Dir(path)
@@ -112,12 +146,12 @@ func readGzipDomains(path string) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", path, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	gr, err := gzip.NewReader(f)
 	if err != nil {
 		return nil, fmt.Errorf("gzip reader: %w", err)
 	}
-	defer gr.Close()
+	defer func() { _ = gr.Close() }()
 	data, err := io.ReadAll(gr)
 	if err != nil {
 		return nil, fmt.Errorf("read gz: %w", err)
@@ -133,11 +167,17 @@ func readGzipDomains(path string) ([]string, error) {
 	return domains, nil
 }
 
+// isDomainFilenameChar reports whether c is allowed in a sanitized domain
+// filename: a-z, 0-9, '.', '-', '_'.
+func isDomainFilenameChar(c rune) bool {
+	return dns.FilenameCharClass.Allows(c)
+}
+
 // sanitizeDomainFilename checks domain name for allowed characters (path traversal protection).
 func sanitizeDomainFilename(domain string) (string, error) {
 	domain = strings.ToLower(strings.TrimSuffix(domain, "."))
 	for _, c := range domain {
-		if !((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '.' || c == '-' || c == '_') {
+		if !isDomainFilenameChar(c) {
 			return "", fmt.Errorf("invalid domain character: %c", c)
 		}
 	}

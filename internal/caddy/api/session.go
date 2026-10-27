@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"sync"
@@ -24,11 +25,11 @@ type SessionManager struct {
 	sessions map[string]sessionEntry
 }
 
-func NewSessionManager() *SessionManager {
+func NewSessionManager(ctx context.Context) *SessionManager {
 	sm := &SessionManager{
 		sessions: make(map[string]sessionEntry),
 	}
-	go sm.cleanupLoop()
+	go sm.cleanupLoop(ctx)
 	return sm
 }
 
@@ -71,17 +72,22 @@ func (sm *SessionManager) Delete(token string) {
 }
 
 // cleanupLoop entfernt abgelaufene Sessions periodisch.
-func (sm *SessionManager) cleanupLoop() {
+func (sm *SessionManager) cleanupLoop(ctx context.Context) {
 	ticker := time.NewTicker(sessionCleanupInterval)
 	defer ticker.Stop()
-	for range ticker.C {
-		sm.mu.Lock()
-		now := time.Now()
-		for token, entry := range sm.sessions {
-			if now.After(entry.expiresAt) {
-				delete(sm.sessions, token)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			sm.mu.Lock()
+			now := time.Now()
+			for token, entry := range sm.sessions {
+				if now.After(entry.expiresAt) {
+					delete(sm.sessions, token)
+				}
 			}
+			sm.mu.Unlock()
 		}
-		sm.mu.Unlock()
 	}
 }

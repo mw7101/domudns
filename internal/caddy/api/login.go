@@ -166,48 +166,13 @@ func LoginPageHandler(w http.ResponseWriter, r *http.Request) {
 // Supports both JSON (Next.js Dashboard) and HTML form.
 func LoginHandler(auth *AuthManager, sessions *SessionManager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var username, password, redirect string
-
-		if isJSONRequest(r) {
-			// JSON request (Next.js Dashboard)
-			var req struct {
-				Username string `json:"username"`
-				Password string `json:"password"`
-				Redirect string `json:"redirect"`
-			}
-			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-				writeError(w, http.StatusBadRequest, "INVALID_JSON", "Ungültige JSON-Anfrage")
-				return
-			}
-			username = req.Username
-			password = req.Password
-			redirect = req.Redirect
-		} else {
-			// HTML form (fallback)
-			if err := r.ParseForm(); err != nil {
-				http.Error(w, "Ungültige Anfrage", http.StatusBadRequest)
-				return
-			}
-			username = r.FormValue("username")
-			password = r.FormValue("password")
-			redirect = r.FormValue("redirect")
-		}
-
-		if !isSafeRedirect(redirect) {
-			redirect = "/"
+		username, password, redirect, ok := parseLoginRequest(w, r)
+		if !ok {
+			return
 		}
 
 		if !auth.ValidatePassword(username, password) {
-			if isJSONRequest(r) {
-				writeError(w, http.StatusUnauthorized, "INVALID_CREDENTIALS", "Ungültige Anmeldedaten.")
-				return
-			}
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.WriteHeader(http.StatusUnauthorized)
-			_ = loginTmpl.Execute(w, loginPageData{
-				Error:    "Ungültige Anmeldedaten.",
-				Redirect: redirect,
-			})
+			respondInvalidCredentials(w, r, redirect)
 			return
 		}
 
@@ -216,31 +181,88 @@ func LoginHandler(auth *AuthManager, sessions *SessionManager) http.HandlerFunc 
 			writeError(w, http.StatusInternalServerError, "SESSION_ERROR", "Interner Fehler")
 			return
 		}
-		http.SetCookie(w, &http.Cookie{
-			Name:     SessionCookieName,
-			Value:    token,
-			Path:     "/",
-			HttpOnly: true,
-			SameSite: http.SameSiteLaxMode,
-			MaxAge:   int(sessionTTL.Seconds()),
-		})
+		setSessionCookie(w, r, token)
 
-		// Setup not yet completed
-		setupCompleted := auth.IsSetupCompleted()
-		if isJSONRequest(r) {
-			writeJSON(w, http.StatusOK, map[string]interface{}{
-				"message":         "Angemeldet",
-				"setup_completed": setupCompleted,
-			})
-			return
-		}
-
-		if !setupCompleted {
-			http.Redirect(w, r, "/setup", http.StatusSeeOther)
-			return
-		}
-		http.Redirect(w, r, redirect, http.StatusSeeOther)
+		respondLoginSuccess(w, r, auth, redirect)
 	}
+}
+
+// parseLoginRequest extracts username/password/redirect from a JSON
+// (Next.js dashboard) or HTML form request and normalizes redirect via
+// isSafeRedirect. Writes the error response itself and reports ok=false on
+// a malformed request.
+func parseLoginRequest(w http.ResponseWriter, r *http.Request) (username, password, redirect string, ok bool) {
+	if isJSONRequest(r) {
+		var req struct {
+			Username string `json:"username"`
+			Password string `json:"password"`
+			Redirect string `json:"redirect"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "INVALID_JSON", "Ungültige JSON-Anfrage")
+			return "", "", "", false
+		}
+		username, password, redirect = req.Username, req.Password, req.Redirect
+	} else {
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "Ungültige Anfrage", http.StatusBadRequest)
+			return "", "", "", false
+		}
+		username = r.FormValue("username")
+		password = r.FormValue("password")
+		redirect = r.FormValue("redirect")
+	}
+	if !isSafeRedirect(redirect) {
+		redirect = "/"
+	}
+	return username, password, redirect, true
+}
+
+// respondInvalidCredentials writes the "wrong username/password" response,
+// as JSON or the HTML login page depending on the request type.
+func respondInvalidCredentials(w http.ResponseWriter, r *http.Request, redirect string) {
+	if isJSONRequest(r) {
+		writeError(w, http.StatusUnauthorized, "INVALID_CREDENTIALS", "Ungültige Anmeldedaten.")
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusUnauthorized)
+	_ = loginTmpl.Execute(w, loginPageData{
+		Error:    "Ungültige Anmeldedaten.",
+		Redirect: redirect,
+	})
+}
+
+// setSessionCookie sets the session cookie for a freshly created session.
+func setSessionCookie(w http.ResponseWriter, r *http.Request, token string) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     SessionCookieName,
+		Value:    token,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   r.TLS != nil,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   int(sessionTTL.Seconds()),
+	})
+}
+
+// respondLoginSuccess writes the post-login response: JSON status for the
+// dashboard, or a redirect to /setup (if the setup wizard isn't done yet)
+// or the originally requested page.
+func respondLoginSuccess(w http.ResponseWriter, r *http.Request, auth *AuthManager, redirect string) {
+	setupCompleted := auth.IsSetupCompleted()
+	if isJSONRequest(r) {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"message":         "Angemeldet",
+			"setup_completed": setupCompleted,
+		})
+		return
+	}
+	if !setupCompleted {
+		http.Redirect(w, r, "/setup", http.StatusSeeOther)
+		return
+	}
+	http.Redirect(w, r, redirect, http.StatusSeeOther)
 }
 
 // LogoutHandler deletes the session and redirects to the login page (POST /api/logout).

@@ -2,11 +2,21 @@ package cluster
 
 import (
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"strconv"
 )
+
+// newNonce returns a random 16-byte hex nonce for HMAC-bound requests.
+func newNonce() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
+}
 
 // computeHMAC calculates HMAC-SHA256 over eventType + ":" + timestamp + ":" + nonce + ":" + data.
 // timestamp is Unix nanoseconds; nonce is a 16-byte random hex string.

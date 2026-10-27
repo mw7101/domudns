@@ -73,7 +73,7 @@ func TestIntegration_BlocklistLifecycle(t *testing.T) {
 	fs := newTestStore(t)
 
 	// URL hinzufügen
-	u, err := fs.AddBlocklistURL(ctx, "https://example.com/blocklist.txt", true)
+	u, err := fs.AddBlocklistURL(ctx, "https://example.com/blocklist.txt", "", true)
 	require.NoError(t, err)
 	assert.Equal(t, 1, u.ID)
 
@@ -100,10 +100,10 @@ func TestIntegration_BlocklistLifecycle(t *testing.T) {
 	assert.NotContains(t, merged, "ads.evil.com")
 
 	// Whitelist-IP
-	require.NoError(t, fs.AddWhitelistIP(ctx, "192.0.2.0/24"))
+	require.NoError(t, fs.AddWhitelistIP(ctx, "192.168.42.0/24"))
 	ips, err := fs.ListWhitelistIPs(ctx)
 	require.NoError(t, err)
-	assert.Contains(t, ips, "192.0.2.0/24")
+	assert.Contains(t, ips, "192.168.42.0/24")
 }
 
 func TestIntegration_AuthLifecycle(t *testing.T) {

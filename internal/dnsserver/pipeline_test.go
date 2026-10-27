@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mw7101/domudns/internal/store"
 	"github.com/miekg/dns"
 )
 
@@ -17,8 +18,14 @@ type stubBlocklistProvider struct {
 	whitelist []string
 }
 
-func (s *stubBlocklistProvider) GetBlockedDomains(_ context.Context) ([]string, error) {
+func (s *stubBlocklistProvider) GetBlocklistURLSets(_ context.Context) ([]store.URLDomainSet, error) {
+	return nil, nil
+}
+func (s *stubBlocklistProvider) GetManualBlockedDomains(_ context.Context) ([]string, error) {
 	return s.domains, nil
+}
+func (s *stubBlocklistProvider) GetAllowedBlockedDomains(_ context.Context) ([]string, error) {
+	return nil, nil
 }
 func (s *stubBlocklistProvider) GetWhitelistIPs(_ context.Context) ([]string, error) {
 	return s.whitelist, nil

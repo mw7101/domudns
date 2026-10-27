@@ -382,9 +382,16 @@ Content-Type: application/json
 {
   "url": "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts",
   "description": "StevenBlack Unified Hosts",
-  "enabled": true
+  "enabled": true,
+  "category": "ads"
 }
 ```
+
+**Fields:**
+- `url` — required
+- `description` — optional
+- `enabled` — optional, default `true`
+- `category` — optional; one of `ads`, `malware`, `adult`, `social`, `gambling`, `tracking`, or `""` (empty = uncategorized, always active regardless of client group)
 
 **Supported formats:**
 - **Hosts format**: `0.0.0.0 ads.example.com`
@@ -446,6 +453,70 @@ GET /api/blocklist/domains?search=ads&limit=100
   "total": 2
 }
 ```
+
+## Client Groups
+
+Per-client-group blocklist category policies. Each group maps a set of IP ranges (CIDRs) to a list of active blocklist categories. If a client IP matches no group, the default policy applies (`ads` + `malware`).
+
+**Categories:** `ads`, `malware`, `adult`, `social`, `gambling`, `tracking`
+
+Uncategorized blocklist entries (empty `category`) are always active regardless of the client's group.
+
+### Get client groups
+```http
+GET /api/client-groups
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "name": "kids",
+      "cidrs": ["192.168.2.0/24"],
+      "categories": ["ads", "malware", "adult", "gambling"]
+    },
+    {
+      "name": "default",
+      "cidrs": ["192.168.1.0/24"],
+      "categories": ["ads", "malware"]
+    }
+  ]
+}
+```
+
+Returns an empty array `[]` if no groups are configured.
+
+### Set client groups (full replace)
+```http
+PUT /api/client-groups
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+[
+  {
+    "name": "kids",
+    "cidrs": ["192.168.2.0/24"],
+    "categories": ["ads", "malware", "adult", "gambling"]
+  }
+]
+```
+
+**Validation:**
+- `name` — required, non-empty, unique across groups
+- `cidrs` — required, non-empty list; each entry must be a valid CIDR (e.g. `192.168.2.0/24`, `10.0.0.0/8`)
+- `categories` — required (may be empty list); each entry must be one of the valid category strings
+
+**Response:** `200 OK` — full list after update
+
+**Note:** This is a full-replace operation. Send the complete desired list, including groups you want to keep. To delete all groups, send an empty array `[]`.
+
+**Cluster:** Changes are propagated to all slaves via `EventClientGroups`.
+
+---
 
 ## Whitelist (Client IP Whitelist)
 
@@ -1029,6 +1100,14 @@ dns_queries_total{qtype="A",result="cached"} 9876
 dns_queries_total{qtype="A",result="forwarded"} 3210
 dns_queries_total{qtype="A",result="error"} 5
 
+# HELP dns_queries_rate_limited_total DNS queries refused by per-client rate limiting
+# TYPE dns_queries_rate_limited_total counter
+dns_queries_rate_limited_total 12
+
+# HELP dns_queries_acl_denied_total DNS queries refused by the client-network allowlist
+# TYPE dns_queries_acl_denied_total counter
+dns_queries_acl_denied_total 3
+
 # HELP dns_query_duration_seconds DNS query processing duration
 # TYPE dns_query_duration_seconds histogram
 dns_query_duration_seconds_bucket{result="forwarded",le="0.005"} 3000
@@ -1042,6 +1121,33 @@ api_requests_total{method="GET",path="/api/zones",status="200"} 100
 ```
 
 **result labels:** `blocked`, `authoritative`, `cached`, `forwarded`, `error`
+
+## DNS Access Control
+
+`dnsserver.allowed_networks` restricts which client networks may use the DNS
+server. Empty (default) allows every client. When non-empty, only queries from
+the listed CIDRs or bare IPs are answered — all other clients receive `REFUSED`.
+Refused queries are counted by `dns_queries_acl_denied_total`. The setting is
+live-reloadable via `PATCH /api/config`.
+
+```yaml
+dnsserver:
+  allowed_networks:
+    - "192.168.0.0/16"
+    - "127.0.0.1"
+    - "::1"
+```
+
+Note: with DoH behind a reverse proxy, the proxy IP is the client IP as seen by
+the DNS server — include it (or the trusted network) in the allowlist.
+
+Active ACME DNS-01 challenges (`_acme-challenge.*` TXT records) are served even
+to clients outside the allowlist: the certificate authority's validation
+resolvers are public and cannot be allowlisted in advance. Only a stored,
+non-expired challenge is exempt (from both the ACL and the rate limiter); every
+other query — including unknown `_acme-challenge` names — remains subject to the
+ACL. Without this, enabling `allowed_networks` would break certificate issuance
+and renewal.
 
 ## Error Responses
 
@@ -1089,11 +1195,35 @@ api_requests_total{method="GET",path="/api/zones",status="200"} 100
 
 ## Rate Limiting
 
-Rate limiting is enabled by default:
-- **Default**: 100 requests per minute per client IP
-- **Configurable**: via `system.rate_limit.requests_per_minute` in config.yaml
+Rate limiting is configured under `system.rate_limit` and applies per client IP.
+Both limits are **sustained requests per minute** with an initial burst equal to
+the configured value.
 
-**Response when rate limited:**
+| Setting | Applies to | Default |
+|---------|------------|---------|
+| `api_requests` | HTTP REST API and DoH | 100/min |
+| `dns_queries` | DNS over UDP, TCP, DoT, DoH | 1000/min |
+
+Set `system.rate_limit.enabled: false` to disable both. A `dns_queries` value of
+`0` disables DNS rate limiting only. When a DNS client exceeds its allowance the
+server answers with `REFUSED`; refused queries are counted by the
+`dns_queries_rate_limited_total` metric.
+
+`system.rate_limit.exempt_networks` accepts a list of CIDRs or bare IPs that
+bypass the DNS limiter entirely. This is required when an upstream router (e.g.
+a FRITZ!Box) forwards every household query from its single IP — without the
+exemption the whole LAN would share one client's bucket:
+
+```yaml
+system:
+  rate_limit:
+    dns_queries: 1000
+    exempt_networks:
+      - "192.0.2.1"
+      - "192.0.2.0/24"
+```
+
+**Response when rate limited (API):**
 ```json
 {
   "success": false,

@@ -46,17 +46,17 @@ func generateSelfSignedCert(t *testing.T) (certFile, keyFile string) {
 	if err != nil {
 		t.Fatalf("CreateTemp cert: %v", err)
 	}
-	t.Cleanup(func() { os.Remove(certTmp.Name()) })
+	t.Cleanup(func() { _ = os.Remove(certTmp.Name()) })
 	if err := pem.Encode(certTmp, &pem.Block{Type: "CERTIFICATE", Bytes: certDER}); err != nil {
 		t.Fatalf("pem.Encode cert: %v", err)
 	}
-	certTmp.Close()
+	_ = certTmp.Close()
 
 	keyTmp, err := os.CreateTemp("", "dot-key-*.pem")
 	if err != nil {
 		t.Fatalf("CreateTemp key: %v", err)
 	}
-	t.Cleanup(func() { os.Remove(keyTmp.Name()) })
+	t.Cleanup(func() { _ = os.Remove(keyTmp.Name()) })
 	privDER, err := x509.MarshalECPrivateKey(priv)
 	if err != nil {
 		t.Fatalf("MarshalECPrivateKey: %v", err)
@@ -64,7 +64,7 @@ func generateSelfSignedCert(t *testing.T) (certFile, keyFile string) {
 	if err := pem.Encode(keyTmp, &pem.Block{Type: "EC PRIVATE KEY", Bytes: privDER}); err != nil {
 		t.Fatalf("pem.Encode key: %v", err)
 	}
-	keyTmp.Close()
+	_ = keyTmp.Close()
 
 	return certTmp.Name(), keyTmp.Name()
 }
@@ -161,7 +161,7 @@ func TestDoT_QueryEndToEnd(t *testing.T) {
 		t.Fatalf("net.Listen: %v", err)
 	}
 	addr := listener.Addr().String()
-	listener.Close()
+	_ = listener.Close()
 
 	s.dotServer.Addr = addr
 
@@ -180,7 +180,7 @@ func TestDoT_QueryEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("tls.Dial: %v", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	// DNS-Query senden
 	m := new(dns.Msg)

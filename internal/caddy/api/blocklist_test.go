@@ -17,7 +17,7 @@ type mockBlocklistStore struct{}
 func (m *mockBlocklistStore) ListBlocklistURLs(ctx context.Context) ([]store.BlocklistURL, error) {
 	return nil, nil
 }
-func (m *mockBlocklistStore) AddBlocklistURL(ctx context.Context, url string, enabled bool) (*store.BlocklistURL, error) {
+func (m *mockBlocklistStore) AddBlocklistURL(ctx context.Context, url string, category string, enabled bool) (*store.BlocklistURL, error) {
 	return &store.BlocklistURL{ID: 1, URL: url, Enabled: enabled, CreatedAt: time.Now()}, nil
 }
 func (m *mockBlocklistStore) RemoveBlocklistURL(ctx context.Context, id int) error { return nil }

@@ -9,29 +9,33 @@ import (
 
 // Router routes HTTP requests to handlers.
 type Router struct {
-	health             *HealthHandler
-	metrics            *MetricsHandler
-	config             *ConfigHandler
-	zones              *ZonesHandler
-	records            *RecordsHandler
-	acme               *ACMEHandler
-	blocklist          *BlocklistHandler
-	queryLog           *querylog.Handler
-	ddns               *DDNSAPIHandler
-	splitHorizon       *SplitHorizonHandler // /api/split-horizon (nil if not configured)
-	dhcpHandler        *DHCPHandler         // /api/dhcp/* (nil if not configured)
-	apiKeys            *APIKeysHandler      // /api/auth/api-keys (nil if not configured)
-	auth               *AuthManager
-	setup              *SetupHandler
-	authHandler        *AuthHandler
-	sessions           *SessionManager
-	metricsEnabled     bool
-	clusterHandler     http.Handler        // /api/internal/* (nil if no cluster)
-	clusterInfoHandler *ClusterInfoHandler  // /api/cluster (nil if not configured)
-	importExport       *ImportExportHandler // /api/zones/import, /api/zones/{domain}/export
-	cacheHandler       *CacheHandler        // /api/cache (nil if cache disabled)
-	slaveMode          bool                 // true when this node is a slave
-	masterURL          string               // master URL for slave error messages
+	health              *HealthHandler
+	metrics             *MetricsHandler
+	config              *ConfigHandler
+	zones               *ZonesHandler
+	records             *RecordsHandler
+	acme                *ACMEHandler
+	blocklist           *BlocklistHandler
+	queryLog            *querylog.Handler
+	ddns                *DDNSAPIHandler
+	splitHorizon        *SplitHorizonHandler // /api/split-horizon (nil if not configured)
+	dhcpHandler         *DHCPHandler         // /api/dhcp/* (nil if not configured)
+	apiKeys             *APIKeysHandler      // /api/auth/api-keys (nil if not configured)
+	auth                *AuthManager
+	setup               *SetupHandler
+	authHandler         *AuthHandler
+	sessions            *SessionManager
+	metricsEnabled      bool
+	clusterHandler      http.Handler         // /api/internal/* (nil if no cluster)
+	clusterInfoHandler  *ClusterInfoHandler  // /api/cluster (nil if not configured)
+	importExport        *ImportExportHandler // /api/zones/import, /api/zones/{domain}/export
+	cloneHandler        *ZoneCloneHandler    // /api/zones/{domain}/clone
+	cacheHandler        *CacheHandler        // /api/cache (nil if cache disabled)
+	clientGroupsHandler *ClientGroupsHandler // /api/client-groups
+	tlsACMEHandler      *TLSACMEHandler      // /api/tls/acme (nil if not configured)
+	pdnsCompatHandler   *PDNSCompatHandler   // /api/v1/servers/* + /api/pdns/* alias (PowerDNS-compat, nil if not configured)
+	slaveMode           bool                 // true when this node is a slave
+	masterURL           string               // master URL for slave error messages
 }
 
 // NewRouter creates a new API router.
@@ -105,9 +109,30 @@ func (r *Router) SetImportExportHandler(h *ImportExportHandler) {
 	r.importExport = h
 }
 
+// SetCloneHandler sets the handler for zone clone endpoint.
+func (r *Router) SetCloneHandler(h *ZoneCloneHandler) {
+	r.cloneHandler = h
+}
+
 // SetCacheHandler sets the handler for /api/cache endpoints.
 func (r *Router) SetCacheHandler(h *CacheHandler) {
 	r.cacheHandler = h
+}
+
+// SetClientGroupsHandler sets the handler for /api/client-groups.
+func (r *Router) SetClientGroupsHandler(h *ClientGroupsHandler) {
+	r.clientGroupsHandler = h
+}
+
+// SetTLSACMEHandler sets the TLS ACME handler.
+func (r *Router) SetTLSACMEHandler(h *TLSACMEHandler) {
+	r.tlsACMEHandler = h
+}
+
+// SetPDNSCompatHandler sets the PowerDNS-compat handler for /api/v1/servers/*
+// (canonical) and the legacy /api/pdns/* alias.
+func (r *Router) SetPDNSCompatHandler(h *PDNSCompatHandler) {
+	r.pdnsCompatHandler = h
 }
 
 // SetSlaveMode enables read-only mode for this node.
@@ -186,76 +211,123 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	AuthMiddleware(r.auth, r.sessions, handler).ServeHTTP(w, req)
 }
 
+// apiHandler picks the /api/* handler for req. Optional features that
+// aren't configured on this node fall back to a 404 via their own
+// *OrNotConfigured method rather than a nested nil check here, keeping this
+// switch a flat list of routes.
 func (r *Router) apiHandler(req *http.Request) http.Handler {
 	path := req.URL.Path
 	switch {
 	case path == "/api/zones" || strings.HasPrefix(path, "/api/zones/"):
-		if strings.Contains(path, "/records") {
-			return r.records
-		}
-		// Import/export routes take priority over the general zone handler
-		if r.importExport != nil && (strings.HasSuffix(path, "/export") ||
-			path == "/api/zones/import" ||
-			path == "/api/zones/import/axfr") {
-			return r.importExport
-		}
-		return r.zones
+		return r.zonesHandler(path)
 	case strings.HasPrefix(path, "/api/acme/dns-01"), strings.HasPrefix(path, "/api/acme/httpreq/"):
 		return r.acme
 	case path == "/api/config":
 		return r.config
 	case path == "/api/cluster":
-		if r.clusterInfoHandler != nil {
-			return r.clusterInfoHandler
-		}
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			writeError(w, http.StatusNotFound, "NOT_FOUND", "Cluster not configured")
-		})
+		return r.clusterHandlerOrNotConfigured()
 	case strings.HasPrefix(path, "/api/blocklist"):
-		if r.blocklist != nil {
-			return r.blocklist
-		}
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			writeError(w, http.StatusNotFound, "NOT_FOUND", "Blocklist not configured")
-		})
+		return r.blocklistHandlerOrNotConfigured()
 	case path == "/api/query-log" || strings.HasPrefix(path, "/api/query-log/"):
-		if r.queryLog != nil {
-			return r.queryLog
-		}
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			writeError(w, http.StatusNotFound, "NOT_FOUND", "Query log not enabled")
-		})
+		return r.queryLogHandlerOrNotConfigured()
 	case strings.HasPrefix(path, "/api/ddns/"):
-		if r.ddns != nil {
-			return r.ddns
-		}
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			writeError(w, http.StatusNotFound, "NOT_FOUND", "DDNS not configured")
-		})
+		return r.ddnsHandlerOrNotConfigured()
 	case path == "/api/split-horizon":
-		if r.splitHorizon != nil {
-			return r.splitHorizon
-		}
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			writeError(w, http.StatusNotFound, "NOT_FOUND", "Split-Horizon not configured")
-		})
+		return r.splitHorizonHandlerOrNotConfigured()
 	case strings.HasPrefix(path, "/api/dhcp/"):
-		if r.dhcpHandler != nil {
-			return r.dhcpHandler
-		}
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			writeError(w, http.StatusNotFound, "NOT_FOUND", "DHCP-Lease-Sync not configured")
-		})
+		return r.dhcpHandlerOrNotConfigured()
 	case path == "/api/cache" || strings.HasPrefix(path, "/api/cache/"):
-		if r.cacheHandler != nil {
-			return r.cacheHandler
-		}
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			writeError(w, http.StatusNotFound, "NOT_FOUND", "Cache not enabled")
-		})
+		return r.cacheHandlerOrNotConfigured()
+	case path == "/api/client-groups":
+		return r.clientGroupsHandlerOrNotConfigured()
+	case strings.HasPrefix(path, "/api/tls/"):
+		return r.tlsACMEHandlerOrNotConfigured()
+	case strings.HasPrefix(path, "/api/v1/servers/"), strings.HasPrefix(path, "/api/pdns/"):
+		return r.pdnsCompatHandlerOrNotConfigured()
 	default:
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			writeError(w, http.StatusNotFound, "NOT_FOUND", "Unknown endpoint")
-		})
+		return notConfiguredHandler("Unknown endpoint")
 	}
+}
+
+// notConfiguredHandler returns a 404 handler for a feature that isn't
+// enabled/configured on this node.
+func notConfiguredHandler(msg string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeError(w, http.StatusNotFound, "NOT_FOUND", msg)
+	})
+}
+
+// zonesHandler picks the zones-family handler for path: records, then
+// import/export or clone (both take priority over the general zone
+// handler), then the general zone handler.
+func (r *Router) zonesHandler(path string) http.Handler {
+	if strings.Contains(path, "/records") {
+		return r.records
+	}
+	if r.importExport != nil && (strings.HasSuffix(path, "/export") ||
+		path == "/api/zones/import" ||
+		path == "/api/zones/import/axfr") {
+		return r.importExport
+	}
+	if r.cloneHandler != nil && strings.HasSuffix(path, "/clone") {
+		return r.cloneHandler
+	}
+	return r.zones
+}
+
+// handlerOrNotConfigured returns h as an http.Handler, or a 404 handler with
+// msg if h is the zero value of T (nil, for the pointer types every caller
+// below passes). T is compared against its zero value at its own static
+// type — not after converting to http.Handler — because a nil *FooHandler
+// stored in an http.Handler interface value is itself non-nil (the classic
+// typed-nil pitfall), which would defeat a plain "h != nil" interface check.
+func handlerOrNotConfigured[T comparable](h T, msg string) http.Handler {
+	var zero T
+	if h == zero {
+		return notConfiguredHandler(msg)
+	}
+	if handler, ok := any(h).(http.Handler); ok {
+		return handler
+	}
+	return notConfiguredHandler(msg)
+}
+
+func (r *Router) clusterHandlerOrNotConfigured() http.Handler {
+	return handlerOrNotConfigured(r.clusterInfoHandler, "Cluster not configured")
+}
+
+func (r *Router) blocklistHandlerOrNotConfigured() http.Handler {
+	return handlerOrNotConfigured(r.blocklist, "Blocklist not configured")
+}
+
+func (r *Router) queryLogHandlerOrNotConfigured() http.Handler {
+	return handlerOrNotConfigured(r.queryLog, "Query log not enabled")
+}
+
+func (r *Router) ddnsHandlerOrNotConfigured() http.Handler {
+	return handlerOrNotConfigured(r.ddns, "DDNS not configured")
+}
+
+func (r *Router) splitHorizonHandlerOrNotConfigured() http.Handler {
+	return handlerOrNotConfigured(r.splitHorizon, "Split-Horizon not configured")
+}
+
+func (r *Router) dhcpHandlerOrNotConfigured() http.Handler {
+	return handlerOrNotConfigured(r.dhcpHandler, "DHCP-Lease-Sync not configured")
+}
+
+func (r *Router) cacheHandlerOrNotConfigured() http.Handler {
+	return handlerOrNotConfigured(r.cacheHandler, "Cache not enabled")
+}
+
+func (r *Router) clientGroupsHandlerOrNotConfigured() http.Handler {
+	return handlerOrNotConfigured(r.clientGroupsHandler, "Client groups not configured")
+}
+
+func (r *Router) tlsACMEHandlerOrNotConfigured() http.Handler {
+	return handlerOrNotConfigured(r.tlsACMEHandler, "TLS/ACME not configured")
+}
+
+func (r *Router) pdnsCompatHandlerOrNotConfigured() http.Handler {
+	return handlerOrNotConfigured(r.pdnsCompatHandler, "PowerDNS-compat API not configured")
 }

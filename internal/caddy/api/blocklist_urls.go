@@ -11,6 +11,7 @@ import (
 
 	"github.com/mw7101/domudns/internal/blocklist"
 	"github.com/mw7101/domudns/internal/config"
+	"github.com/mw7101/domudns/internal/dns"
 	"github.com/mw7101/domudns/internal/store"
 )
 
@@ -49,6 +50,31 @@ func NewBlocklistHandler(store store.BlocklistStore, cfg *config.Config, coredns
 	return h
 }
 
+// blocklistRoute matches a request against one path pattern and, if it
+// matches, handles it and reports true. A path match with no matching
+// method reports false so ServeHTTP falls through to the next route and,
+// eventually, the 404 — routes never overlap since each checks a distinct
+// resource name in parts[0].
+type blocklistRoute func(h *BlocklistHandler, w http.ResponseWriter, r *http.Request, parts []string) bool
+
+// blocklistRoutes lists the /api/blocklist/* routes in the order they're
+// tried. Order only matters in that a more specific pattern (e.g. .../fetch)
+// must be checked before a less specific one that could also match its
+// length — see the parts-length guard in each route.
+var blocklistRoutes = []blocklistRoute{
+	routeBlocklistURLsCollection,
+	routeBlocklistURLsItem,
+	routeBlocklistURLsFetch,
+	routeBlocklistDomainsCollection,
+	routeBlocklistDomainsItem,
+	routeBlocklistAllowedCollection,
+	routeBlocklistAllowedItem,
+	routeBlocklistPatternsCollection,
+	routeBlocklistPatternsItem,
+	routeBlocklistWhitelistIPsCollection,
+	routeBlocklistWhitelistIPsItem,
+}
+
 // ServeHTTP routes blocklist requests.
 func (h *BlocklistHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/api/blocklist")
@@ -60,140 +86,179 @@ func (h *BlocklistHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// /api/blocklist/urls
-	if len(parts) == 1 && parts[0] == "urls" {
-		switch r.Method {
-		case http.MethodGet:
-			h.listURLs(r.Context(), w)
-			return
-		case http.MethodPost:
-			h.addURL(r.Context(), w, r)
-			return
-		}
-	}
-
-	// /api/blocklist/urls/{id}
-	if len(parts) == 2 && parts[0] == "urls" {
-		id, err := strconv.Atoi(parts[1])
-		if err != nil || id < 1 {
-			writeError(w, http.StatusBadRequest, "INVALID_ID", "Invalid URL ID")
-			return
-		}
-		switch r.Method {
-		case http.MethodDelete:
-			h.removeURL(r.Context(), w, id)
-			return
-		case http.MethodPatch:
-			h.toggleURLEnabled(r.Context(), w, id, r)
-			return
-		}
-	}
-
-	// /api/blocklist/urls/{id}/fetch
-	if len(parts) == 3 && parts[0] == "urls" && parts[2] == "fetch" {
-		id, err := strconv.Atoi(parts[1])
-		if err != nil || id < 1 {
-			writeError(w, http.StatusBadRequest, "INVALID_ID", "Invalid URL ID")
-			return
-		}
-		if r.Method == http.MethodPost {
-			h.fetchURL(r.Context(), w, id)
-			return
-		}
-	}
-
-	// /api/blocklist/domains
-	if len(parts) == 1 && parts[0] == "domains" {
-		switch r.Method {
-		case http.MethodGet:
-			h.listBlockedDomains(r.Context(), w)
-			return
-		case http.MethodPost:
-			h.addBlockedDomain(r.Context(), w, r)
-			return
-		}
-	}
-
-	// /api/blocklist/domains/{domain}
-	if len(parts) == 2 && parts[0] == "domains" {
-		domain := parts[1]
-		if r.Method == http.MethodDelete {
-			h.removeBlockedDomain(r.Context(), w, domain)
-			return
-		}
-	}
-
-	// /api/blocklist/allowed
-	if len(parts) == 1 && parts[0] == "allowed" {
-		switch r.Method {
-		case http.MethodGet:
-			h.listAllowedDomains(r.Context(), w)
-			return
-		case http.MethodPost:
-			h.addAllowedDomain(r.Context(), w, r)
-			return
-		}
-	}
-
-	// /api/blocklist/allowed/{domain}
-	if len(parts) == 2 && parts[0] == "allowed" {
-		domain := parts[1]
-		if r.Method == http.MethodDelete {
-			h.removeAllowedDomain(r.Context(), w, domain)
-			return
-		}
-	}
-
-	// /api/blocklist/patterns
-	if len(parts) == 1 && parts[0] == "patterns" {
-		switch r.Method {
-		case http.MethodGet:
-			h.listPatterns(r.Context(), w)
-			return
-		case http.MethodPost:
-			h.addPattern(r.Context(), w, r)
-			return
-		}
-	}
-
-	// /api/blocklist/patterns/{id}
-	if len(parts) == 2 && parts[0] == "patterns" {
-		id, err := strconv.Atoi(parts[1])
-		if err != nil || id < 1 {
-			writeError(w, http.StatusBadRequest, "INVALID_ID", "Invalid pattern ID")
-			return
-		}
-		if r.Method == http.MethodDelete {
-			h.removePattern(r.Context(), w, id)
-			return
-		}
-	}
-
-	// /api/blocklist/whitelist-ips
-	if len(parts) == 1 && parts[0] == "whitelist-ips" {
-		switch r.Method {
-		case http.MethodGet:
-			h.listWhitelistIPs(r.Context(), w)
-			return
-		case http.MethodPost:
-			h.addWhitelistIP(r.Context(), w, r)
-			return
-		}
-	}
-
-	// /api/blocklist/whitelist-ips/{ip_cidr}
-	if len(parts) >= 2 && parts[0] == "whitelist-ips" {
-		ipCIDR := strings.Join(parts[1:], "/")
-		if u, err := url.PathUnescape(ipCIDR); err == nil {
-			ipCIDR = u
-		}
-		if r.Method == http.MethodDelete {
-			h.removeWhitelistIP(r.Context(), w, ipCIDR)
+	for _, route := range blocklistRoutes {
+		if route(h, w, r, parts) {
 			return
 		}
 	}
 
 	writeError(w, http.StatusNotFound, "NOT_FOUND", "Unknown blocklist endpoint")
+}
+
+// /api/blocklist/urls
+func routeBlocklistURLsCollection(h *BlocklistHandler, w http.ResponseWriter, r *http.Request, parts []string) bool {
+	if len(parts) != 1 || parts[0] != "urls" {
+		return false
+	}
+	switch r.Method {
+	case http.MethodGet:
+		h.listURLs(r.Context(), w)
+	case http.MethodPost:
+		h.addURL(r.Context(), w, r)
+	default:
+		return false
+	}
+	return true
+}
+
+// /api/blocklist/urls/{id}
+func routeBlocklistURLsItem(h *BlocklistHandler, w http.ResponseWriter, r *http.Request, parts []string) bool {
+	if len(parts) != 2 || parts[0] != "urls" {
+		return false
+	}
+	id, err := strconv.Atoi(parts[1])
+	if err != nil || id < 1 {
+		writeError(w, http.StatusBadRequest, "INVALID_ID", "Invalid URL ID")
+		return true
+	}
+	switch r.Method {
+	case http.MethodDelete:
+		h.removeURL(r.Context(), w, id)
+	case http.MethodPatch:
+		h.toggleURLEnabled(r.Context(), w, id, r)
+	default:
+		return false
+	}
+	return true
+}
+
+// /api/blocklist/urls/{id}/fetch
+func routeBlocklistURLsFetch(h *BlocklistHandler, w http.ResponseWriter, r *http.Request, parts []string) bool {
+	if len(parts) != 3 || parts[0] != "urls" || parts[2] != "fetch" {
+		return false
+	}
+	id, err := strconv.Atoi(parts[1])
+	if err != nil || id < 1 {
+		writeError(w, http.StatusBadRequest, "INVALID_ID", "Invalid URL ID")
+		return true
+	}
+	if r.Method != http.MethodPost {
+		return false
+	}
+	h.fetchURL(r.Context(), w, id)
+	return true
+}
+
+// /api/blocklist/domains
+func routeBlocklistDomainsCollection(h *BlocklistHandler, w http.ResponseWriter, r *http.Request, parts []string) bool {
+	if len(parts) != 1 || parts[0] != "domains" {
+		return false
+	}
+	switch r.Method {
+	case http.MethodGet:
+		h.listBlockedDomains(r.Context(), w)
+	case http.MethodPost:
+		h.addBlockedDomain(r.Context(), w, r)
+	default:
+		return false
+	}
+	return true
+}
+
+// /api/blocklist/domains/{domain}
+func routeBlocklistDomainsItem(h *BlocklistHandler, w http.ResponseWriter, r *http.Request, parts []string) bool {
+	if len(parts) != 2 || parts[0] != "domains" || r.Method != http.MethodDelete {
+		return false
+	}
+	h.removeBlockedDomain(r.Context(), w, parts[1])
+	return true
+}
+
+// /api/blocklist/allowed
+func routeBlocklistAllowedCollection(h *BlocklistHandler, w http.ResponseWriter, r *http.Request, parts []string) bool {
+	if len(parts) != 1 || parts[0] != "allowed" {
+		return false
+	}
+	switch r.Method {
+	case http.MethodGet:
+		h.listAllowedDomains(r.Context(), w)
+	case http.MethodPost:
+		h.addAllowedDomain(r.Context(), w, r)
+	default:
+		return false
+	}
+	return true
+}
+
+// /api/blocklist/allowed/{domain}
+func routeBlocklistAllowedItem(h *BlocklistHandler, w http.ResponseWriter, r *http.Request, parts []string) bool {
+	if len(parts) != 2 || parts[0] != "allowed" || r.Method != http.MethodDelete {
+		return false
+	}
+	h.removeAllowedDomain(r.Context(), w, parts[1])
+	return true
+}
+
+// /api/blocklist/patterns
+func routeBlocklistPatternsCollection(h *BlocklistHandler, w http.ResponseWriter, r *http.Request, parts []string) bool {
+	if len(parts) != 1 || parts[0] != "patterns" {
+		return false
+	}
+	switch r.Method {
+	case http.MethodGet:
+		h.listPatterns(r.Context(), w)
+	case http.MethodPost:
+		h.addPattern(r.Context(), w, r)
+	default:
+		return false
+	}
+	return true
+}
+
+// /api/blocklist/patterns/{id}
+func routeBlocklistPatternsItem(h *BlocklistHandler, w http.ResponseWriter, r *http.Request, parts []string) bool {
+	if len(parts) != 2 || parts[0] != "patterns" {
+		return false
+	}
+	id, err := strconv.Atoi(parts[1])
+	if err != nil || id < 1 {
+		writeError(w, http.StatusBadRequest, "INVALID_ID", "Invalid pattern ID")
+		return true
+	}
+	if r.Method != http.MethodDelete {
+		return false
+	}
+	h.removePattern(r.Context(), w, id)
+	return true
+}
+
+// /api/blocklist/whitelist-ips
+func routeBlocklistWhitelistIPsCollection(h *BlocklistHandler, w http.ResponseWriter, r *http.Request, parts []string) bool {
+	if len(parts) != 1 || parts[0] != "whitelist-ips" {
+		return false
+	}
+	switch r.Method {
+	case http.MethodGet:
+		h.listWhitelistIPs(r.Context(), w)
+	case http.MethodPost:
+		h.addWhitelistIP(r.Context(), w, r)
+	default:
+		return false
+	}
+	return true
+}
+
+// /api/blocklist/whitelist-ips/{ip_cidr}
+func routeBlocklistWhitelistIPsItem(h *BlocklistHandler, w http.ResponseWriter, r *http.Request, parts []string) bool {
+	if len(parts) < 2 || parts[0] != "whitelist-ips" || r.Method != http.MethodDelete {
+		return false
+	}
+	ipCIDR := strings.Join(parts[1:], "/")
+	if u, err := url.PathUnescape(ipCIDR); err == nil {
+		ipCIDR = u
+	}
+	h.removeWhitelistIP(r.Context(), w, ipCIDR)
+	return true
 }
 
 func (h *BlocklistHandler) regenerateHosts(ctx context.Context) {
@@ -216,48 +281,30 @@ func (h *BlocklistHandler) listURLs(ctx context.Context, w http.ResponseWriter) 
 
 func (h *BlocklistHandler) addURL(ctx context.Context, w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		URL     string `json:"url"`
-		Enabled *bool  `json:"enabled"`
+		URL      string `json:"url"`
+		Category string `json:"category"`
+		Enabled  *bool  `json:"enabled"`
 	}
 	if err := DecodeJSON(r, &req, 0); err != nil {
 		writeError(w, http.StatusBadRequest, "INVALID_JSON", "Invalid request body")
 		return
 	}
-	// Check resource limit
-	urls, err := h.store.ListBlocklistURLs(ctx)
-	if err != nil {
-		writeInternalError(w, "DB_ERROR", err)
+	if !h.checkBlocklistURLLimit(ctx, w) {
 		return
 	}
-	if len(urls) >= maxBlocklistURLs {
-		writeError(w, http.StatusBadRequest, "LIMIT_EXCEEDED", fmt.Sprintf("Maximum %d blocklist URLs allowed", maxBlocklistURLs))
+	urlStr, ok := validateBlocklistURLValue(w, req.URL)
+	if !ok {
 		return
 	}
-	urlStr := strings.TrimSpace(req.URL)
-	if urlStr == "" {
-		writeError(w, http.StatusBadRequest, "INVALID_URL", "URL is required")
+	if !validateBlocklistCategory(w, req.Category) {
 		return
 	}
-	// Validate URL format and scheme (SSRF prevention)
-	parsedURL, err := url.Parse(urlStr)
-	if err != nil || parsedURL.Scheme == "" || parsedURL.Host == "" {
-		writeError(w, http.StatusBadRequest, "INVALID_URL", "URL must be valid with scheme and host")
-		return
-	}
-	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
-		writeError(w, http.StatusBadRequest, "INVALID_URL", "URL scheme must be http or https")
-		return
-	}
-	// Prevent SSRF: block internal/private hosts
-	if isInternalBlocklistHost(parsedURL.Host) {
-		writeError(w, http.StatusBadRequest, "INVALID_URL", "Cannot fetch from internal or private hosts")
-		return
-	}
+
 	enabled := true
 	if req.Enabled != nil {
 		enabled = *req.Enabled
 	}
-	u, err := h.store.AddBlocklistURL(ctx, urlStr, enabled)
+	u, err := h.store.AddBlocklistURL(ctx, urlStr, req.Category, enabled)
 	if err != nil {
 		if strings.Contains(err.Error(), "duplicate") || strings.Contains(err.Error(), "unique") {
 			writeError(w, http.StatusConflict, "URL_EXISTS", "Blocklist URL already exists")
@@ -268,6 +315,62 @@ func (h *BlocklistHandler) addURL(ctx context.Context, w http.ResponseWriter, r 
 	}
 	h.regenerateHosts(ctx)
 	writeSuccess(w, u, http.StatusCreated)
+}
+
+// checkBlocklistURLLimit reports whether another blocklist URL may be
+// added. Writes the error response itself and returns false when the limit
+// is reached or the current count can't be read.
+func (h *BlocklistHandler) checkBlocklistURLLimit(ctx context.Context, w http.ResponseWriter) bool {
+	urls, err := h.store.ListBlocklistURLs(ctx)
+	if err != nil {
+		writeInternalError(w, "DB_ERROR", err)
+		return false
+	}
+	if len(urls) >= maxBlocklistURLs {
+		writeError(w, http.StatusBadRequest, "LIMIT_EXCEEDED", fmt.Sprintf("Maximum %d blocklist URLs allowed", maxBlocklistURLs))
+		return false
+	}
+	return true
+}
+
+// validateBlocklistURLValue validates and trims a blocklist URL: non-empty,
+// well-formed with an http(s) scheme, and not pointing at an internal or
+// private host (SSRF prevention). Writes the error response itself on
+// failure.
+func validateBlocklistURLValue(w http.ResponseWriter, rawURL string) (string, bool) {
+	urlStr := strings.TrimSpace(rawURL)
+	if urlStr == "" {
+		writeError(w, http.StatusBadRequest, "INVALID_URL", "URL is required")
+		return "", false
+	}
+	parsedURL, err := url.Parse(urlStr)
+	if err != nil || parsedURL.Scheme == "" || parsedURL.Host == "" {
+		writeError(w, http.StatusBadRequest, "INVALID_URL", "URL must be valid with scheme and host")
+		return "", false
+	}
+	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
+		writeError(w, http.StatusBadRequest, "INVALID_URL", "URL scheme must be http or https")
+		return "", false
+	}
+	if isInternalBlocklistHost(parsedURL.Host) {
+		writeError(w, http.StatusBadRequest, "INVALID_URL", "Cannot fetch from internal or private hosts")
+		return "", false
+	}
+	return urlStr, true
+}
+
+// validateBlocklistCategory reports whether category is valid: empty
+// (uncategorized) is always valid; otherwise it must be a known category.
+// Writes the error response itself on failure.
+func validateBlocklistCategory(w http.ResponseWriter, category string) bool {
+	if category == "" {
+		return true
+	}
+	if _, ok := dns.ValidCategories[category]; !ok {
+		writeError(w, http.StatusBadRequest, "INVALID_CATEGORY", "Unknown category: "+category)
+		return false
+	}
+	return true
 }
 
 func (h *BlocklistHandler) removeURL(ctx context.Context, w http.ResponseWriter, id int) {

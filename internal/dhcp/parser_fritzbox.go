@@ -156,7 +156,7 @@ func (p *FritzBoxParser) doSOAP(ctx context.Context, action, body string) ([]byt
 	if err != nil {
 		return nil, fmt.Errorf("fritzbox: SOAP %s: %w", action, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {

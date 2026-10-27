@@ -42,6 +42,24 @@ var DNSQueryDuration = prometheus.NewHistogramVec(
 	[]string{"result"},
 )
 
+// DNSRateLimitedTotal counts DNS queries dropped because a client IP
+// exceeded system.rate_limit.dns_queries.
+var DNSRateLimitedTotal = prometheus.NewCounter(
+	prometheus.CounterOpts{
+		Name: "dns_queries_rate_limited_total",
+		Help: "Total number of DNS queries refused by per-client rate limiting",
+	},
+)
+
+// DNSACLDroppedTotal counts DNS queries refused because the client is not in
+// dnsserver.allowed_networks.
+var DNSACLDroppedTotal = prometheus.NewCounter(
+	prometheus.CounterOpts{
+		Name: "dns_queries_acl_denied_total",
+		Help: "Total number of DNS queries refused by the client-network allowlist",
+	},
+)
+
 // APIRequestsTotal counts HTTP API requests.
 var APIRequestsTotal = prometheus.NewCounterVec(
 	prometheus.CounterOpts{
@@ -52,5 +70,5 @@ var APIRequestsTotal = prometheus.NewCounterVec(
 )
 
 func init() {
-	Registry().MustRegister(DNSQueriesTotal, DNSQueryDuration, APIRequestsTotal)
+	Registry().MustRegister(DNSQueriesTotal, DNSQueryDuration, DNSRateLimitedTotal, DNSACLDroppedTotal, APIRequestsTotal)
 }

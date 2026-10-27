@@ -1,5 +1,6 @@
 "use client";
 import { useState, useEffect, useCallback, useRef, DependencyList } from "react";
+import { getErrorMessage } from "../utils";
 
 export interface ApiRequestState<T> {
   data: T | null;
@@ -28,7 +29,7 @@ export function useApiRequest<T>(
         setLoading(false);
       })
       .catch((err: unknown) => {
-        setError(err instanceof Error ? err.message : String(err));
+        setError(getErrorMessage(err, String(err)));
         setLoading(false);
       });
   }, deps); // eslint-disable-line react-hooks/exhaustive-deps

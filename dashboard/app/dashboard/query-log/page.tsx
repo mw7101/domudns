@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { Topbar } from '@/components/layout/Topbar'
 import { queryLog, blocklist, type QueryLogEntry } from '@/lib/api'
+import { getErrorMessage } from '@/lib/utils'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -135,7 +136,7 @@ function RowMenu({ entry, onWhitelisted, onError }: { entry: QueryLogEntry; onWh
       setOpen(false)
       onWhitelisted(entry.domain)
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Unbekannter Fehler'
+      const msg = getErrorMessage(err, 'Unbekannter Fehler')
       onError(`Fehler beim Freigeben: ${msg}`)
       setOpen(false)
     } finally {

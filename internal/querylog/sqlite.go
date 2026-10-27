@@ -44,12 +44,12 @@ func NewSQLiteStore(path, dataDir string, persistDays int) (*SQLiteStore, error)
 	db.SetMaxOpenConns(1)
 
 	if err := applyPragmas(db); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("apply pragmas: %w", err)
 	}
 
 	if err := createSchema(db); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("create schema: %w", err)
 	}
 
@@ -163,7 +163,7 @@ func (s *SQLiteStore) Query(ctx context.Context, f QueryLogFilter) (QueryLogPage
 	if err != nil {
 		return QueryLogPage{}, fmt.Errorf("select query: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	entries := make([]QueryLogEntry, 0, limit)
 	for rows.Next() {
@@ -204,7 +204,7 @@ func (s *SQLiteStore) writeBatch(entries []QueryLogEntry) error {
 	if err != nil {
 		return fmt.Errorf("prepare stmt: %w", err)
 	}
-	defer stmt.Close()
+	defer func() { _ = stmt.Close() }()
 
 	for _, e := range entries {
 		_, err := stmt.Exec(
@@ -292,7 +292,7 @@ func (s *SQLiteStore) HourlyStats(cutoff time.Time) (map[time.Time]int64, error)
 	if err != nil {
 		return nil, fmt.Errorf("hourly stats query: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	counts := make(map[time.Time]int64)
 	for rows.Next() {

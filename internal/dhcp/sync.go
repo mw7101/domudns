@@ -28,7 +28,7 @@ type SyncManagerConfig struct {
 	Parser       LeaseParser
 	Store        DHCPStore
 	Zone         string // Forward-Zone (z.B. "home.lan")
-	ReverseZone  string // Reverse-Zone (z.B. "2.0.192.in-addr.arpa"), leer = auto
+	ReverseZone  string // Reverse-Zone (z.B. "42.168.192.in-addr.arpa"), leer = auto
 	TTL          int
 	AutoCreate   bool
 	ZoneReloader func()
@@ -148,7 +148,42 @@ func (sm *SyncManager) syncOnce(ctx context.Context) {
 		return
 	}
 
-	// Build new lease map (only with valid hostname)
+	newMap := buildLeaseMap(leases)
+
+	sm.mu.Lock()
+	oldState := sm.state
+	sm.mu.Unlock()
+
+	reverseZone, err := sm.ensureSyncZones(syncCtx, newMap)
+	if err != nil {
+		sm.setError(err)
+		return
+	}
+
+	changed := sm.applyLeaseDiff(syncCtx, oldState, newMap, reverseZone)
+
+	sm.saveState()
+
+	if changed && sm.zoneReloader != nil {
+		sm.zoneReloader()
+		log.Info().
+			Int("leases", len(newMap)).
+			Str("zone", sm.zone).
+			Msg("dhcp sync: Zonen neu geladen")
+	}
+
+	sm.recordSyncSuccess(len(newMap))
+
+	log.Debug().
+		Int("leases", len(newMap)).
+		Int("tracked", len(sm.state)).
+		Bool("changed", changed).
+		Msg("dhcp sync: Durchlauf abgeschlossen")
+}
+
+// buildLeaseMap indexes leases by IP, dropping any without a usable
+// hostname after sanitization.
+func buildLeaseMap(leases []Lease) map[string]Lease {
 	newMap := make(map[string]Lease, len(leases))
 	for _, l := range leases {
 		h := sanitizeHostname(l.Hostname)
@@ -158,18 +193,17 @@ func (sm *SyncManager) syncOnce(ctx context.Context) {
 		l.Hostname = h
 		newMap[l.IP] = l
 	}
+	return newMap
+}
 
-	sm.mu.Lock()
-	oldState := sm.state
-	sm.mu.Unlock()
-
-	// Ensure forward zone exists
-	if err := sm.ensureZone(syncCtx, sm.zone); err != nil {
-		sm.setError(err)
-		return
+// ensureSyncZones makes sure the forward zone and a reverse zone exist. The
+// reverse zone is the configured one, or auto-derived from an arbitrary
+// lease IP when none is configured.
+func (sm *SyncManager) ensureSyncZones(ctx context.Context, newMap map[string]Lease) (string, error) {
+	if err := sm.ensureZone(ctx, sm.zone); err != nil {
+		return "", err
 	}
 
-	// Determine and ensure reverse zone
 	reverseZone := sm.reverseZone
 	if reverseZone == "" && len(newMap) > 0 {
 		// Auto-derive from first IP
@@ -179,18 +213,23 @@ func (sm *SyncManager) syncOnce(ctx context.Context) {
 		}
 	}
 	if reverseZone != "" {
-		if err := sm.ensureZone(syncCtx, reverseZone); err != nil {
-			sm.setError(err)
-			return
+		if err := sm.ensureZone(ctx, reverseZone); err != nil {
+			return "", err
 		}
 	}
+	return reverseZone, nil
+}
 
+// applyLeaseDiff removes DNS records for leases no longer present and
+// creates records for new or hostname-changed ones, updating sm.state.
+// Reports whether anything changed.
+func (sm *SyncManager) applyLeaseDiff(ctx context.Context, oldState map[string]*TrackedLease, newMap map[string]Lease, reverseZone string) bool {
 	changed := false
 
 	// Remove deleted leases
 	for ip, tracked := range oldState {
 		if _, exists := newMap[ip]; !exists {
-			sm.deleteTrackedRecords(syncCtx, tracked, reverseZone)
+			sm.deleteTrackedRecords(ctx, tracked, reverseZone)
 			sm.mu.Lock()
 			delete(sm.state, ip)
 			sm.mu.Unlock()
@@ -209,11 +248,11 @@ func (sm *SyncManager) syncOnce(ctx context.Context) {
 
 		if exists && tracked.Hostname != lease.Hostname {
 			// Hostname changed → delete old records
-			sm.deleteTrackedRecords(syncCtx, tracked, reverseZone)
+			sm.deleteTrackedRecords(ctx, tracked, reverseZone)
 		}
 
 		// Create new records
-		newTracked := sm.createRecords(syncCtx, lease, reverseZone)
+		newTracked := sm.createRecords(ctx, lease, reverseZone)
 		if newTracked != nil {
 			sm.mu.Lock()
 			sm.state[ip] = newTracked
@@ -222,31 +261,17 @@ func (sm *SyncManager) syncOnce(ctx context.Context) {
 		}
 	}
 
-	// Persist state
-	sm.saveState()
+	return changed
+}
 
-	// Reload zone if changes
-	if changed && sm.zoneReloader != nil {
-		sm.zoneReloader()
-		log.Info().
-			Int("leases", len(newMap)).
-			Str("zone", sm.zone).
-			Msg("dhcp sync: Zonen neu geladen")
-	}
-
-	// Update status
+// recordSyncSuccess updates sm.status after a successful sync pass.
+func (sm *SyncManager) recordSyncSuccess(leaseCount int) {
 	sm.mu.Lock()
+	defer sm.mu.Unlock()
 	sm.status.LastSync = time.Now()
 	sm.status.LastError = ""
-	sm.status.LeaseCount = len(newMap)
+	sm.status.LeaseCount = leaseCount
 	sm.status.RecordCount = len(sm.state) * 2 // A + PTR
-	sm.mu.Unlock()
-
-	log.Debug().
-		Int("leases", len(newMap)).
-		Int("tracked", len(sm.state)).
-		Bool("changed", changed).
-		Msg("dhcp sync: Durchlauf abgeschlossen")
 }
 
 func (sm *SyncManager) setError(err error) {

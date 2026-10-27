@@ -67,6 +67,41 @@ func TestPrepareRequest_OriginalNotMutated(t *testing.T) {
 	}
 }
 
+func TestPrepareRequest_NoDuplicateOPT(t *testing.T) {
+	v := NewDNSSECValidator(true)
+
+	req := makeQuery("example.com", dns.TypeA)
+	req.SetEdns0(512, false) // Client already has an OPT record with DO=false
+
+	out := v.PrepareRequest(req)
+
+	// Regression test for the double-OPT bug (commit 7402990): SetEdns0
+	// always appends a new OPT instead of replacing an existing one. If the
+	// in-place update in PrepareRequest is ever replaced by an unconditional
+	// out.SetEdns0(...), the copy ends up with two OPT records — a RFC 6891
+	// violation that causes upstreams like Unbound to return FORMERR.
+	optCount := 0
+	for _, rr := range out.Extra {
+		if rr.Header().Rrtype == dns.TypeOPT {
+			optCount++
+		}
+	}
+	if optCount != 1 {
+		t.Fatalf("PrepareRequest: expected exactly 1 OPT record in Extra, got %d", optCount)
+	}
+
+	opt := out.IsEdns0()
+	if opt == nil {
+		t.Fatal("PrepareRequest: OPT record missing in copy")
+	}
+	if !opt.Do() {
+		t.Error("PrepareRequest: DO bit must be set in the copy")
+	}
+	if opt.UDPSize() != 4096 {
+		t.Errorf("PrepareRequest: UDPSize: want 4096, got %d", opt.UDPSize())
+	}
+}
+
 func TestPrepareRequest_CDBitPreserved(t *testing.T) {
 	v := NewDNSSECValidator(true)
 

@@ -1,5 +1,12 @@
 # Stage 1: Next.js Dashboard bauen
-FROM node:20-alpine AS dashboard-builder
+# Exakter Node-Pin statt Floating-Tag: Node 20 ist EOL und bekommt keine
+# Sicherheitsfixes mehr — u. a. nicht für CVE-2026-111497 (Out-of-Bounds-Write im
+# gebündelten Brotli-Decoder); 22.23.4 ist der Release mit diesem Fix. Die Stage
+# liegt nicht im Runtime-Image (nur die daraus gebauten statischen Assets in
+# internal/caddy/web), aber `npm ci` dekodiert hier Registry-Antworten — das soll
+# nicht mit einer ungepatchten Toolchain passieren. Pin hier und in
+# .gitlab-ci.yml (NODE_IMAGE) gemeinsam hochziehen.
+FROM node:22.23.4-alpine AS dashboard-builder
 WORKDIR /app/dashboard
 COPY dashboard/package*.json ./
 RUN npm ci --prefer-offline
@@ -7,7 +14,11 @@ COPY dashboard/ ./
 RUN npm run build
 
 # Stage 2: Go-Binary bauen
-FROM golang:1.24-alpine AS go-builder
+# Exakter Toolchain-Pin (passend zu `go 1.27.3` in go.mod und GO_IMAGE in
+# .gitlab-ci.yml): die alte 1.24-Linie bekommt keine Security-Releases mehr und
+# baute eine Standardbibliothek mit bekannten CVEs (net/http, http2, crypto/tls,
+# crypto/x509, html/template, mime/multipart) direkt ins ausgelieferte Binary.
+FROM golang:1.27.3-alpine AS go-builder
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download

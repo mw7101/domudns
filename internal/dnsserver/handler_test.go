@@ -11,9 +11,8 @@ import (
 
 // mockResponseWriter is a dns.ResponseWriter for tests.
 type mockResponseWriter struct {
-	remoteAddr string
-	written    *dns.Msg
-	writeErr   error
+	written  *dns.Msg
+	writeErr error
 }
 
 func (m *mockResponseWriter) LocalAddr() net.Addr  { return &net.UDPAddr{} }
@@ -30,11 +29,6 @@ func (m *mockResponseWriter) Close() error                { return nil }
 func (m *mockResponseWriter) TsigStatus() error           { return nil }
 func (m *mockResponseWriter) TsigTimersOnly(bool)         {}
 func (m *mockResponseWriter) Hijack()                     {}
-
-// withRemoteAddr creates a mockResponseWriter with fixed remote address.
-func withRemoteAddr(addr string) *mockResponseWriter {
-	return &mockResponseWriter{remoteAddr: addr}
-}
 
 // Override RemoteAddr for IP tests
 type mockRWWithAddr struct {
@@ -90,7 +84,7 @@ func TestHandler_AnyQueryRefused(t *testing.T) {
 func TestHandler_BlocklistHit(t *testing.T) {
 	bl := NewBlocklistManager()
 	bl.mu.Lock()
-	bl.domains["ads.evil.com"] = struct{}{}
+	bl.uncatDomains["ads.evil.com"] = struct{}{}
 	bl.mu.Unlock()
 
 	h := NewHandler(nil, bl, nil, nil, "0.0.0.0", "::", nil, false)
@@ -122,7 +116,7 @@ func TestHandler_BlocklistHit(t *testing.T) {
 func TestHandler_WhitelistBypass(t *testing.T) {
 	bl := NewBlocklistManager()
 	bl.mu.Lock()
-	bl.domains["ads.evil.com"] = struct{}{}
+	bl.uncatDomains["ads.evil.com"] = struct{}{}
 	_, ipNet, _ := net.ParseCIDR("192.168.1.0/24")
 	bl.whitelist = []*net.IPNet{ipNet}
 	bl.mu.Unlock()
@@ -241,7 +235,7 @@ func TestHandler_ServfailNotCached(t *testing.T) {
 func TestHandler_RespondBlocked_ZeroIP(t *testing.T) {
 	bl := NewBlocklistManager()
 	bl.mu.Lock()
-	bl.domains["ads.example.com"] = struct{}{}
+	bl.uncatDomains["ads.example.com"] = struct{}{}
 	bl.mu.Unlock()
 
 	h := NewHandler(nil, bl, nil, nil, "0.0.0.0", "::", nil, false)
@@ -293,7 +287,7 @@ func TestHandler_RespondBlocked_ZeroIP(t *testing.T) {
 func TestHandler_RespondBlocked_NXDOMAIN(t *testing.T) {
 	bl := NewBlocklistManager()
 	bl.mu.Lock()
-	bl.domains["ads.example.com"] = struct{}{}
+	bl.uncatDomains["ads.example.com"] = struct{}{}
 	bl.mu.Unlock()
 
 	h := NewHandler(nil, bl, nil, nil, "0.0.0.0", "::", nil, false)
@@ -328,7 +322,7 @@ func TestHandler_RespondBlocked_NXDOMAIN(t *testing.T) {
 func TestHandler_UpdateBlockMode_LiveReload(t *testing.T) {
 	bl := NewBlocklistManager()
 	bl.mu.Lock()
-	bl.domains["ads.example.com"] = struct{}{}
+	bl.uncatDomains["ads.example.com"] = struct{}{}
 	bl.mu.Unlock()
 
 	h := NewHandler(nil, bl, nil, nil, "0.0.0.0", "::", nil, false)
@@ -363,7 +357,7 @@ func TestHandler_UpdateBlockMode_LiveReload(t *testing.T) {
 func TestHandler_UpdateBlockMode_InvalidFallsBackToZeroIP(t *testing.T) {
 	bl := NewBlocklistManager()
 	bl.mu.Lock()
-	bl.domains["ads.example.com"] = struct{}{}
+	bl.uncatDomains["ads.example.com"] = struct{}{}
 	bl.mu.Unlock()
 
 	h := NewHandler(nil, bl, nil, nil, "0.0.0.0", "::", nil, false)

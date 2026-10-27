@@ -14,18 +14,18 @@ func tempDB(t *testing.T) (*SQLiteStore, func()) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.Close()
+	_ = f.Close()
 
 	store, err := NewSQLiteStore(f.Name(), "", 7)
 	if err != nil {
-		os.Remove(f.Name())
+		_ = os.Remove(f.Name())
 		t.Fatal(err)
 	}
 	return store, func() {
-		store.db.Close()
-		os.Remove(f.Name())
-		os.Remove(f.Name() + "-wal")
-		os.Remove(f.Name() + "-shm")
+		_ = store.db.Close()
+		_ = os.Remove(f.Name())
+		_ = os.Remove(f.Name() + "-wal")
+		_ = os.Remove(f.Name() + "-shm")
 	}
 }
 

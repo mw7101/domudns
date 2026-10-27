@@ -5,6 +5,11 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
+/** Extracts a user-facing message from a caught error, falling back for non-Error values (e.g. thrown strings). */
+export function getErrorMessage(err: unknown, fallback = 'Fehler'): string {
+  return err instanceof Error ? err.message : fallback
+}
+
 export function fmtNum(n: number | null | undefined): string {
   if (n == null) return '–'
   if (n >= 1e9) return (n / 1e9).toFixed(1) + 'G'

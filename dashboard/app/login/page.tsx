@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { MovingBorderButton } from '@/components/ui/moving-border'
 import { motion } from 'framer-motion'
 import { DomULogoIcon } from '@/components/layout/DomULogo'
+import { auth, ApiError } from '@/lib/api'
 
 function LoginForm() {
   const router = useRouter()
@@ -20,22 +21,10 @@ function LoginForm() {
     setLoading(true)
 
     try {
-      const res = await fetch('/api/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ username, password }),
-      })
-
-      const data = await res.json().catch(() => ({}))
-
-      if (res.status === 401 || !res.ok) {
-        const msg = (data as { error?: { message?: string } })?.error?.message ?? 'Ungültige Anmeldedaten.'
-        setError(msg)
-        return
-      }
+      const data = await auth.login(username, password)
 
       // Setup not yet completed?
-      if ((data as { setup_completed?: boolean })?.setup_completed === false) {
+      if (data.setup_completed === false) {
         router.push('/setup/')
         return
       }
@@ -43,8 +32,8 @@ function LoginForm() {
       const redirect = searchParams.get('redirect')
       const safe = redirect && redirect.startsWith('/') && !redirect.startsWith('//')
       router.push(safe ? redirect : '/dashboard/overview/')
-    } catch {
-      setError('Verbindungsfehler. Bitte versuche es erneut.')
+    } catch (err: unknown) {
+      setError(err instanceof ApiError ? err.message || 'Ungültige Anmeldedaten.' : 'Verbindungsfehler. Bitte versuche es erneut.')
     } finally {
       setLoading(false)
     }

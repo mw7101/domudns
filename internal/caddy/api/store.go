@@ -16,5 +16,7 @@ type Store interface {
 	store.AuthStore
 	store.TSIGKeyStore
 	store.NamedAPIKeyStore
+	store.ClientGroupStore
+	store.TLSACMEStore
 	HealthCheck(ctx context.Context) error
 }

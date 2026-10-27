@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto"
 	"encoding/base64"
 	"time"
 
@@ -37,6 +38,27 @@ func (s *PropagatingStore) PutZone(ctx context.Context, zone *dns.Zone) error {
 	return nil
 }
 
+// UpdateZone performs an atomic read-modify-write on a zone (see
+// store.ZoneWriter.UpdateZone) and propagates EventZoneUpdated with the
+// resulting zone — but only once mutate has actually succeeded. On failure
+// (zone not found, or mutate itself returns an error) nothing is persisted
+// and nothing is propagated.
+func (s *PropagatingStore) UpdateZone(ctx context.Context, domain, view string, mutate func(*dns.Zone) error) error {
+	var mutated *dns.Zone
+	wrapped := func(zone *dns.Zone) error {
+		if err := mutate(zone); err != nil {
+			return err
+		}
+		mutated = zone
+		return nil
+	}
+	if err := s.FileStore.UpdateZone(ctx, domain, view, wrapped); err != nil {
+		return err
+	}
+	s.propagator.PushAsync(EventZoneUpdated, mutated)
+	return nil
+}
+
 // DeleteZone deletes a zone and propagates EventZoneDeleted.
 func (s *PropagatingStore) DeleteZone(ctx context.Context, domain string) error {
 	if err := s.FileStore.DeleteZone(ctx, domain); err != nil {
@@ -67,7 +89,7 @@ func (s *PropagatingStore) PutRecord(ctx context.Context, zoneDomain string, rec
 	if err := s.FileStore.PutRecord(ctx, zoneDomain, record); err != nil {
 		return err
 	}
-	zone, err := s.FileStore.GetZone(ctx, zoneDomain)
+	zone, err := s.GetZone(ctx, zoneDomain)
 	if err == nil {
 		s.propagator.PushAsync(EventZoneUpdated, zone)
 	}
@@ -79,7 +101,7 @@ func (s *PropagatingStore) DeleteRecord(ctx context.Context, zoneDomain string, 
 	if err := s.FileStore.DeleteRecord(ctx, zoneDomain, recordID); err != nil {
 		return err
 	}
-	zone, err := s.FileStore.GetZone(ctx, zoneDomain)
+	zone, err := s.GetZone(ctx, zoneDomain)
 	if err == nil {
 		s.propagator.PushAsync(EventZoneUpdated, zone)
 	}
@@ -87,8 +109,8 @@ func (s *PropagatingStore) DeleteRecord(ctx context.Context, zoneDomain string, 
 }
 
 // AddBlocklistURL adds a URL and propagates EventBlocklistURLs.
-func (s *PropagatingStore) AddBlocklistURL(ctx context.Context, url string, enabled bool) (*store.BlocklistURL, error) {
-	result, err := s.FileStore.AddBlocklistURL(ctx, url, enabled)
+func (s *PropagatingStore) AddBlocklistURL(ctx context.Context, url string, category string, enabled bool) (*store.BlocklistURL, error) {
+	result, err := s.FileStore.AddBlocklistURL(ctx, url, category, enabled)
 	if err != nil {
 		return nil, err
 	}
@@ -210,7 +232,7 @@ func (s *PropagatingStore) MarkSetupCompleted(ctx context.Context) error {
 	if err := s.FileStore.MarkSetupCompleted(ctx); err != nil {
 		return err
 	}
-	cfg, err := s.FileStore.GetAuthConfig(ctx)
+	cfg, err := s.GetAuthConfig(ctx)
 	if err == nil {
 		s.propagator.PushAsync(EventAuthConfig, cfg)
 	}
@@ -222,7 +244,7 @@ func (s *PropagatingStore) UpdateConfigOverrides(ctx context.Context, overrides 
 	if err := s.FileStore.UpdateConfigOverrides(ctx, overrides); err != nil {
 		return err
 	}
-	current, err := s.FileStore.GetConfigOverrides(ctx)
+	current, err := s.GetConfigOverrides(ctx)
 	if err == nil {
 		s.propagator.PushAsync(EventConfigOverrides, current)
 	}
@@ -275,6 +297,15 @@ func (s *PropagatingStore) DeleteNamedAPIKey(ctx context.Context, id string) err
 	return nil
 }
 
+// SetClientGroups stores client groups and propagates EventClientGroups.
+func (s *PropagatingStore) SetClientGroups(ctx context.Context, groups []*dns.ClientGroup) error {
+	if err := s.FileStore.SetClientGroups(ctx, groups); err != nil {
+		return err
+	}
+	s.propagator.PushAsync(EventClientGroups, groups)
+	return nil
+}
+
 // PutACMEChallenge delegates to FileStore (no propagation - short-lived).
 func (s *PropagatingStore) PutACMEChallenge(ctx context.Context, fqdn, value string, ttl time.Duration) error {
 	return s.FileStore.PutACMEChallenge(ctx, fqdn, value, ttl)
@@ -288,49 +319,49 @@ func (s *PropagatingStore) DeleteACMEChallenge(ctx context.Context, fqdn string)
 // --- Helper functions for bulk pushes ---
 
 func (s *PropagatingStore) pushBlocklistURLs(ctx context.Context) {
-	urls, err := s.FileStore.ListBlocklistURLs(ctx)
+	urls, err := s.ListBlocklistURLs(ctx)
 	if err == nil {
 		s.propagator.PushAsync(EventBlocklistURLs, urls)
 	}
 }
 
 func (s *PropagatingStore) pushManualDomains(ctx context.Context) {
-	domains, err := s.FileStore.ListBlockedDomains(ctx)
+	domains, err := s.ListBlockedDomains(ctx)
 	if err == nil {
 		s.propagator.PushAsync(EventManualDomains, domains)
 	}
 }
 
 func (s *PropagatingStore) pushAllowedDomains(ctx context.Context) {
-	domains, err := s.FileStore.ListAllowedDomains(ctx)
+	domains, err := s.ListAllowedDomains(ctx)
 	if err == nil {
 		s.propagator.PushAsync(EventAllowedDomains, domains)
 	}
 }
 
 func (s *PropagatingStore) pushBlocklistPatterns(ctx context.Context) {
-	patterns, err := s.FileStore.ListBlocklistPatterns(ctx)
+	patterns, err := s.ListBlocklistPatterns(ctx)
 	if err == nil {
 		s.propagator.PushAsync(EventBlocklistPatterns, patterns)
 	}
 }
 
 func (s *PropagatingStore) pushWhitelistIPs(ctx context.Context) {
-	ips, err := s.FileStore.ListWhitelistIPs(ctx)
+	ips, err := s.ListWhitelistIPs(ctx)
 	if err == nil {
 		s.propagator.PushAsync(EventWhitelistIPs, ips)
 	}
 }
 
 func (s *PropagatingStore) pushTSIGKeys(ctx context.Context) {
-	keys, err := s.FileStore.GetTSIGKeys(ctx)
+	keys, err := s.GetTSIGKeys(ctx)
 	if err == nil {
 		s.propagator.PushAsync(EventTSIGKeys, keys)
 	}
 }
 
 func (s *PropagatingStore) pushNamedAPIKeys(ctx context.Context) {
-	keys, err := s.FileStore.GetAllNamedAPIKeys(ctx)
+	keys, err := s.GetAllNamedAPIKeys(ctx)
 	if err == nil {
 		s.propagator.PushAsync(EventAPIKeys, keys)
 	}
@@ -339,6 +370,40 @@ func (s *PropagatingStore) pushNamedAPIKeys(ctx context.Context) {
 func (s *PropagatingStore) pushURLDomains(urlID int, domains []string) {
 	payload := buildURLDomainsPayload(urlID, domains)
 	s.propagator.PushAsync(EventURLDomains, payload)
+}
+
+// SetTLSCert stores the TLS cert and propagates EventTLSCert to slaves.
+func (s *PropagatingStore) SetTLSCert(ctx context.Context, payload *store.TLSCertPayload) error {
+	if err := s.FileStore.SetTLSCert(ctx, payload); err != nil {
+		return err
+	}
+	s.propagator.PushAsync(EventTLSCert, payload)
+	return nil
+}
+
+// GetTLSCert delegates to FileStore (no propagation needed).
+func (s *PropagatingStore) GetTLSCert(ctx context.Context) (*store.TLSCertPayload, error) {
+	return s.FileStore.GetTLSCert(ctx)
+}
+
+// GetTLSACMEConfig delegates to FileStore.
+func (s *PropagatingStore) GetTLSACMEConfig(ctx context.Context) (*store.TLSACMEConfig, error) {
+	return s.FileStore.GetTLSACMEConfig(ctx)
+}
+
+// SetTLSACMEConfig stores ACME config (no cluster push — config is master-only).
+func (s *PropagatingStore) SetTLSACMEConfig(ctx context.Context, cfg *store.TLSACMEConfig) error {
+	return s.FileStore.SetTLSACMEConfig(ctx, cfg)
+}
+
+// GetACMEAccountKey delegates to FileStore (account key is master-only, not synced).
+func (s *PropagatingStore) GetACMEAccountKey(ctx context.Context) (crypto.Signer, error) {
+	return s.FileStore.GetACMEAccountKey(ctx)
+}
+
+// SetACMEAccountKey delegates to FileStore (account key is master-only, not synced).
+func (s *PropagatingStore) SetACMEAccountKey(ctx context.Context, key crypto.Signer) error {
+	return s.FileStore.SetACMEAccountKey(ctx, key)
 }
 
 // buildURLDomainsPayload creates a URLDomainsPayload with a gzip+base64 encoded domain list.

@@ -58,7 +58,7 @@ cluster:
   data_dir: "/var/lib/domudns/data"
   slaves:
     - "http://192.0.2.152:80"
-  push_timeout: "5s"
+  push_timeout: "30s"
   poll_interval: "30s"
 
 dnsserver:
@@ -206,11 +206,30 @@ If a push is lost (slave was offline), the slave polls the master every 30s:
 
 ```
 GET http://192.0.2.151/api/internal/state
-X-DNS-Stack-HMAC: <hmac>
 
-→ Response: complete state (all zones, auth, config, blocklist metadata)
-   Slave compares timestamps and updates as needed
+→ Response: complete state (all zones, auth, config, blocklist metadata +
+   per-URL domain checksums under `url_domains_meta`)
 ```
+
+Per-URL **domain lists** are too large for the state response, so the state
+only carries `{url_id, sha256}` metadata. The slave compares those checksums
+with its local `<id>.domains.gz` files and pulls only the stale or missing
+sets:
+
+```
+GET http://192.0.2.151/api/internal/url-domains/<id>
+X-Sync-Timestamp: <unix_nanos>
+X-Sync-Nonce:     <random hex>
+X-Sync-HMAC:      <HMAC-SHA256 over "url_domains_pull:<ts>:<nonce>:<id>">
+
+→ Response: raw gzip domain set (application/gzip); written verbatim so the
+   local checksum matches the master's
+```
+
+This makes a lost `url_domains` push self-healing: without it a slave keeps
+the stale set until the master's next fetch cycle (up to 24h), because slaves
+never fetch external URLs themselves. The pull endpoint is authenticated with
+the same HMAC secret as pushes (URL id + timestamp + one-time nonce).
 
 ### Slave Read-Only Protection
 
@@ -239,6 +258,8 @@ Master fetch loop (every 24h):
 ```
 
 Slaves **never** fetch external URLs. Only the master fetches and propagates.
+If the `EventURLDomains` push is lost, the slave detects the mismatch via the
+polled `url_domains_meta` checksums and pulls the set (see Fallback Polling).
 
 ## DNS Load Balancing
 
@@ -262,7 +283,7 @@ Since all slaves are synchronized with the master, any Pi can answer DNS request
 |----------|----------|
 | Slave goes down | Master + other slave handle DNS; on recovery, slave polling catches up with changes |
 | Master goes down | Slaves continue serving with last known state; no new config changes possible |
-| Push fails | Retry queue (100 events); fallback polling after 30s |
+| Push fails | Bounded retry (0/2s/5s); fallback polling after 30s repairs URL domains via checksums |
 | Network partition | Slaves continue operating autonomously; master updates slaves after recovery |
 
 **Master failover:** Manual — promote a slave IP to master role in config.yaml and configure all others as slaves. No automatic leader election.

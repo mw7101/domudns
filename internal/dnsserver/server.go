@@ -56,6 +56,18 @@ type Config struct {
 	// RebindingProtectionWhitelist contains domain suffixes excluded from the check
 	// (e.g. "fritz.box", "corp.internal").
 	RebindingProtectionWhitelist []string
+	// RateLimitEnabled enables per-client-IP DNS query rate limiting.
+	RateLimitEnabled bool
+	// RateLimitDNSQueries is the sustained allowance of queries per minute per
+	// client IP (initial burst is the same value). Ignored unless RateLimitEnabled.
+	RateLimitDNSQueries int
+	// RateLimitExemptNetworks lists CIDRs/bare IPs (e.g. the LAN router that
+	// forwards all household queries) that bypass DNS rate limiting entirely.
+	RateLimitExemptNetworks []string
+	// AllowedNetworks is a client-network allowlist: when non-empty, only
+	// queries from these CIDRs/bare IPs are answered; every other client gets
+	// REFUSED. Empty (default) allows all clients.
+	AllowedNetworks []string
 }
 
 // New creates a new DNS server instance
@@ -93,6 +105,11 @@ func New(cfg Config) *Server {
 		cacheStopCh: make(chan struct{}),
 	}
 
+	// Per-client-IP DNS query rate limiting (system.rate_limit.dns_queries).
+	s.UpdateRateLimit(cfg.RateLimitEnabled, cfg.RateLimitDNSQueries, cfg.RateLimitExemptNetworks)
+	// Client-network access control (dnsserver.allowed_networks).
+	s.UpdateAccessControl(cfg.AllowedNetworks)
+
 	// UDP server
 	s.udpServer = &dns.Server{
 		Addr:          cfg.Listen,
@@ -112,29 +129,36 @@ func New(cfg Config) *Server {
 		MsgAcceptFunc: ddnsMsgAcceptFunc,
 	}
 
-	// DoT server (DNS over TLS, RFC 7858) — only when enabled + certificate present
-	if cfg.DoTEnabled && cfg.DoTCertFile != "" && cfg.DoTKeyFile != "" {
-		cert, err := tls.LoadX509KeyPair(cfg.DoTCertFile, cfg.DoTKeyFile)
-		if err != nil {
-			log.Warn().Err(err).Msg("DoT: Zertifikat konnte nicht geladen werden — DoT deaktiviert")
-		} else {
-			tlsCfg := &tls.Config{
-				Certificates: []tls.Certificate{cert},
-				MinVersion:   tls.VersionTLS12,
-			}
-			s.dotServer = &dns.Server{
-				Addr:          cfg.DoTListen,
-				Net:           "tcp-tls",
-				Handler:       handler,
-				TLSConfig:     tlsCfg,
-				MsgAcceptFunc: ddnsMsgAcceptFunc,
-			}
-		}
-	} else if cfg.DoTEnabled {
-		log.Warn().Msg("DoT aktiviert, aber cert_file/key_file fehlen — DoT deaktiviert")
-	}
+	s.dotServer = newDoTServer(cfg, handler)
 
 	return s
+}
+
+// newDoTServer builds the DNS-over-TLS server (RFC 7858) when enabled with
+// a certificate configured, logging a warning and returning nil otherwise.
+func newDoTServer(cfg Config, handler *Handler) *dns.Server {
+	if !cfg.DoTEnabled {
+		return nil
+	}
+	if cfg.DoTCertFile == "" || cfg.DoTKeyFile == "" {
+		log.Warn().Msg("DoT aktiviert, aber cert_file/key_file fehlen — DoT deaktiviert")
+		return nil
+	}
+	cert, err := tls.LoadX509KeyPair(cfg.DoTCertFile, cfg.DoTKeyFile)
+	if err != nil {
+		log.Warn().Err(err).Msg("DoT: Zertifikat konnte nicht geladen werden — DoT deaktiviert")
+		return nil
+	}
+	return &dns.Server{
+		Addr:    cfg.DoTListen,
+		Net:     "tcp-tls",
+		Handler: handler,
+		TLSConfig: &tls.Config{
+			Certificates: []tls.Certificate{cert},
+			MinVersion:   tls.VersionTLS12,
+		},
+		MsgAcceptFunc: ddnsMsgAcceptFunc,
+	}
 }
 
 // GetHandler returns the internal DNS handler (for DoH integration).
@@ -145,6 +169,11 @@ func (s *Server) SetSplitHorizonResolver(r *SplitHorizonResolver) {
 	s.handler.SetSplitHorizonResolver(r)
 }
 
+// SetClientGroupResolver sets the client group resolver on the DNS handler.
+func (s *Server) SetClientGroupResolver(r *ClientGroupResolver) {
+	s.handler.SetClientGroupResolver(r)
+}
+
 // SetAXFRHandler sets the AXFR/IXFR handler (nil = disabled).
 func (s *Server) SetAXFRHandler(a *AXFRHandler) {
 	s.handler.SetAXFRHandler(a)
@@ -153,6 +182,36 @@ func (s *Server) SetAXFRHandler(a *AXFRHandler) {
 // SetACMEChallengeReader sets the ACME challenge reader (nil = disabled).
 func (s *Server) SetACMEChallengeReader(r ACMEChallengeReader) {
 	s.handler.SetACMEChallengeReader(r)
+}
+
+// UpdateRateLimit enables/disables per-client-IP DNS query rate limiting and
+// sets the sustained queries-per-minute allowance. Applies live without restart.
+func (s *Server) UpdateRateLimit(enabled bool, queriesPerMinute int, exemptNetworks []string) {
+	if !enabled {
+		s.handler.SetRateLimiter(nil)
+		log.Info().Msg("DNS query rate limiting disabled")
+		return
+	}
+	lim := NewQueryRateLimiter(queriesPerMinute, exemptNetworks)
+	if lim == nil {
+		s.handler.SetRateLimiter(nil)
+		log.Warn().Msg("rate_limit.enabled is true but dns_queries <= 0 — DNS rate limiting disabled")
+		return
+	}
+	s.handler.SetRateLimiter(lim)
+	log.Info().Int("queries_per_minute", queriesPerMinute).Msg("DNS query rate limiting enabled")
+}
+
+// UpdateAccessControl replaces the client-network allowlist for DNS queries.
+// Empty (default) allows every client. Applies live without restart.
+func (s *Server) UpdateAccessControl(allowedNetworks []string) {
+	nets := parseNetworks(allowedNetworks, "dnsserver.allowed_networks")
+	s.handler.SetAccessControl(nets)
+	if len(nets) > 0 {
+		log.Info().Int("networks", len(nets)).Msg("DNS access control enabled (allowed_networks)")
+	} else {
+		log.Debug().Msg("DNS access control disabled (all clients allowed)")
+	}
 }
 
 // UpdateAXFRAllowedIPs replaces the allowed AXFR client IPs/CIDRs at runtime.
@@ -218,6 +277,12 @@ func (s *Server) ReloadWhitelist(ctx context.Context, store BlocklistProvider) e
 	return s.blocklist.ReloadWhitelist(ctx, store)
 }
 
+// ApplyBlocklistURLDomains updates the in-memory blocklist for a single URL without disk I/O.
+// Called by the cluster receiver after an EventURLDomains sync event.
+func (s *Server) ApplyBlocklistURLDomains(urlID int, category string, domains []string) {
+	s.blocklist.ApplyURLDomains(urlID, category, domains)
+}
+
 // LoadZones loads authoritative zones from the store.
 func (s *Server) LoadZones(ctx context.Context, store ZoneProvider) error {
 	return s.zones.Load(ctx, store)
@@ -236,63 +301,13 @@ func (s *Server) Start(ctx context.Context) error {
 	var wg sync.WaitGroup
 	errChan := make(chan error, 2)
 
-	// Start UDP server
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		log.Info().Str("proto", "udp").Str("addr", s.listen).Msg("DNS server listening")
-		if err := s.udpServer.ListenAndServe(); err != nil {
-			errChan <- fmt.Errorf("udp server: %w", err)
-		}
-	}()
-
-	// Start TCP server
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		log.Info().Str("proto", "tcp").Str("addr", s.listen).Msg("DNS server listening")
-		if err := s.tcpServer.ListenAndServe(); err != nil {
-			errChan <- fmt.Errorf("tcp server: %w", err)
-		}
-	}()
-
-	// Start DoT server (DNS over TLS, RFC 7858)
+	s.startListener(&wg, errChan, "udp", "udp", s.udpServer)
+	s.startListener(&wg, errChan, "tcp", "tcp", s.tcpServer)
 	if s.dotServer != nil {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			log.Info().Str("proto", "tcp-tls").Str("addr", s.dotServer.Addr).Msg("DoT server listening")
-			if err := s.dotServer.ListenAndServe(); err != nil {
-				errChan <- fmt.Errorf("dot server: %w", err)
-			}
-		}()
+		s.startListener(&wg, errChan, "tcp-tls", "dot", s.dotServer)
 	}
 
-	// Graceful shutdown on context cancel
-	go func() {
-		<-ctx.Done()
-		log.Info().Msg("shutting down DNS server")
-
-		// Stop cache cleanup loop
-		if s.cache != nil {
-			close(s.cacheStopCh)
-		}
-
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-
-		if err := s.udpServer.ShutdownContext(shutdownCtx); err != nil {
-			log.Error().Err(err).Msg("UDP server shutdown error")
-		}
-		if err := s.tcpServer.ShutdownContext(shutdownCtx); err != nil {
-			log.Error().Err(err).Msg("TCP server shutdown error")
-		}
-		if s.dotServer != nil {
-			if err := s.dotServer.ShutdownContext(shutdownCtx); err != nil {
-				log.Error().Err(err).Msg("DoT server shutdown error")
-			}
-		}
-	}()
+	go s.shutdownOnDone(ctx)
 
 	// Wait for servers or return first error
 	go func() {
@@ -311,6 +326,50 @@ func (s *Server) Start(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// startListener runs srv.ListenAndServe() in a goroutine tracked by wg,
+// logging under logProto and, on failure, sending an error labeled
+// errLabel to errChan.
+func (s *Server) startListener(wg *sync.WaitGroup, errChan chan<- error, logProto, errLabel string, srv *dns.Server) {
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		log.Info().Str("proto", logProto).Str("addr", srv.Addr).Msg("DNS server listening")
+		if err := srv.ListenAndServe(); err != nil {
+			errChan <- fmt.Errorf("%s server: %w", errLabel, err)
+		}
+	}()
+}
+
+// shutdownOnDone waits for ctx to be cancelled, then gracefully shuts down
+// every listener and stops the cache cleanup loop.
+func (s *Server) shutdownOnDone(ctx context.Context) {
+	<-ctx.Done()
+	log.Info().Msg("shutting down DNS server")
+
+	// Stop cache cleanup loop
+	if s.cache != nil {
+		close(s.cacheStopCh)
+	}
+
+	// Stop rate limiter cleanup goroutine
+	s.handler.SetRateLimiter(nil)
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := s.udpServer.ShutdownContext(shutdownCtx); err != nil {
+		log.Error().Err(err).Msg("UDP server shutdown error")
+	}
+	if err := s.tcpServer.ShutdownContext(shutdownCtx); err != nil {
+		log.Error().Err(err).Msg("TCP server shutdown error")
+	}
+	if s.dotServer != nil {
+		if err := s.dotServer.ShutdownContext(shutdownCtx); err != nil {
+			log.Error().Err(err).Msg("DoT server shutdown error")
+		}
+	}
 }
 
 // ddnsMsgAcceptFunc extends DefaultMsgAcceptFunc to also accept RFC 2136 UPDATE messages.

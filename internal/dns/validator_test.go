@@ -2,6 +2,7 @@ package dns
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -104,8 +105,71 @@ func TestValidateRecord(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:    "invalid name - dot",
+			name:    "valid name - multi-label subdomain",
 			record:  Record{Name: "sub.domain", Type: TypeA, TTL: 3600, Value: "192.168.1.1"},
+			zone:    "example.com",
+			wantErr: false,
+		},
+		{
+			name:    "valid name - multi-label ACME challenge",
+			record:  Record{Name: "_acme-challenge.pve-node", Type: TypeTXT, TTL: 300, Value: "sometoken"},
+			zone:    "example.com",
+			wantErr: false,
+		},
+		{
+			name:    "valid name - multi-label www.dev",
+			record:  Record{Name: "www.dev", Type: TypeA, TTL: 3600, Value: "192.168.1.1"},
+			zone:    "example.com",
+			wantErr: false,
+		},
+		{
+			name:    "valid name - bare wildcard",
+			record:  Record{Name: "*", Type: TypeA, TTL: 3600, Value: "192.168.1.1"},
+			zone:    "example.com",
+			wantErr: false,
+		},
+		{
+			name:    "invalid name - multi-label wildcard",
+			record:  Record{Name: "*.dev", Type: TypeA, TTL: 3600, Value: "192.168.1.1"},
+			zone:    "example.com",
+			wantErr: true,
+		},
+		{
+			name:    "invalid name - wildcard in interior label",
+			record:  Record{Name: "a*.b", Type: TypeA, TTL: 3600, Value: "192.168.1.1"},
+			zone:    "example.com",
+			wantErr: true,
+		},
+		{
+			name:    "invalid name - empty label",
+			record:  Record{Name: "a..b", Type: TypeA, TTL: 3600, Value: "192.168.1.1"},
+			zone:    "example.com",
+			wantErr: true,
+		},
+		{
+			name:    "invalid name - leading dot",
+			record:  Record{Name: ".a", Type: TypeA, TTL: 3600, Value: "192.168.1.1"},
+			zone:    "example.com",
+			wantErr: true,
+		},
+		{
+			name:    "invalid name - trailing dot",
+			record:  Record{Name: "a.", Type: TypeA, TTL: 3600, Value: "192.168.1.1"},
+			zone:    "example.com",
+			wantErr: true,
+		},
+		{
+			name:    "invalid name - label longer than 63 chars",
+			record:  Record{Name: strings.Repeat("a", 64), Type: TypeA, TTL: 3600, Value: "192.168.1.1"},
+			zone:    "example.com",
+			wantErr: true,
+		},
+		{
+			name: "invalid name - name longer than 253 chars",
+			record: Record{
+				Name: strings.Repeat("abcdefghij.", 23) + "abcdefghij", // 263 chars, every label <= 63
+				Type: TypeA, TTL: 3600, Value: "192.168.1.1",
+			},
 			zone:    "example.com",
 			wantErr: true,
 		},
@@ -119,37 +183,37 @@ func TestValidateRecord(t *testing.T) {
 		{
 			name:    "valid PTR record in in-addr.arpa zone",
 			record:  Record{Name: "1", Type: TypePTR, TTL: 3600, Value: "router.int.example.com"},
-			zone:    "2.0.192.in-addr.arpa",
+			zone:    "42.168.192.in-addr.arpa",
 			wantErr: false,
 		},
 		{
 			name:    "valid PTR record - DHCP hostname with underscore",
 			record:  Record{Name: "79", Type: TypePTR, TTL: 3600, Value: "ESP_CC8108.int.example.com"},
-			zone:    "2.0.192.in-addr.arpa",
+			zone:    "42.168.192.in-addr.arpa",
 			wantErr: false,
 		},
 		{
 			name:    "valid PTR at apex",
 			record:  Record{Name: "@", Type: TypePTR, TTL: 3600, Value: "host.example.com"},
-			zone:    "2.0.192.in-addr.arpa",
+			zone:    "42.168.192.in-addr.arpa",
 			wantErr: false,
 		},
 		{
 			name:    "PTR value is IP address (Fehler: muss Hostname sein)",
-			record:  Record{Name: "1", Type: TypePTR, TTL: 3600, Value: "192.0.2.1"},
-			zone:    "2.0.192.in-addr.arpa",
+			record:  Record{Name: "1", Type: TypePTR, TTL: 3600, Value: "192.168.42.1"},
+			zone:    "42.168.192.in-addr.arpa",
 			wantErr: true,
 		},
 		{
 			name:    "PTR name not a number in in-addr.arpa zone",
 			record:  Record{Name: "host", Type: TypePTR, TTL: 3600, Value: "router.example.com"},
-			zone:    "2.0.192.in-addr.arpa",
+			zone:    "42.168.192.in-addr.arpa",
 			wantErr: true,
 		},
 		{
 			name:    "PTR name > 255 in in-addr.arpa zone",
 			record:  Record{Name: "256", Type: TypePTR, TTL: 3600, Value: "router.example.com"},
-			zone:    "2.0.192.in-addr.arpa",
+			zone:    "42.168.192.in-addr.arpa",
 			wantErr: true,
 		},
 		{
@@ -167,7 +231,7 @@ func TestValidateRecord(t *testing.T) {
 		{
 			name:    "PTR invalid target FQDN",
 			record:  Record{Name: "1", Type: TypePTR, TTL: 3600, Value: ""},
-			zone:    "2.0.192.in-addr.arpa",
+			zone:    "42.168.192.in-addr.arpa",
 			wantErr: true,
 		},
 		{

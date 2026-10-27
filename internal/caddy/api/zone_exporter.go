@@ -1,34 +1,59 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"strings"
 
 	"github.com/mw7101/domudns/internal/dns"
+	"github.com/mw7101/domudns/internal/dnsserver"
 	mdns "github.com/miekg/dns"
 )
 
 // handleExportZone exports a zone as an RFC 1035 zone file.
 // GET /api/zones/{domain}/export?view=
 func (h *ImportExportHandler) handleExportZone(w http.ResponseWriter, r *http.Request) {
-	// Extract domain from path: /api/zones/{domain}/export
+	domain, view, ok := parseZoneExportPath(w, r)
+	if !ok {
+		return
+	}
+
+	zone, ok := h.loadExportZone(r.Context(), w, domain, view)
+	if !ok {
+		return
+	}
+	zone.EnsureSOA()
+
+	filename := domain + ".zone"
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.WriteString(w, buildZoneFile(zone))
+}
+
+// parseZoneExportPath extracts and validates domain/view from
+// GET /api/zones/{domain}/export?view=. Writes the error response itself
+// on failure.
+func parseZoneExportPath(w http.ResponseWriter, r *http.Request) (domain, view string, ok bool) {
 	path := strings.TrimPrefix(r.URL.Path, "/api/zones/")
-	domain := strings.TrimSuffix(path, "/export")
+	domain = strings.TrimSuffix(path, "/export")
 	if domain == "" || !dns.IsValidDomain(domain) {
 		writeError(w, http.StatusBadRequest, "INVALID_ZONE", "Invalid domain name")
-		return
+		return "", "", false
 	}
-
-	view := r.URL.Query().Get("view")
+	view = r.URL.Query().Get("view")
 	if view != "" && !isValidViewName(view) {
 		writeError(w, http.StatusBadRequest, "INVALID_VIEW", "Invalid view name (only [a-z0-9_-] allowed)")
-		return
+		return "", "", false
 	}
+	return domain, view, true
+}
 
-	ctx := r.Context()
+// loadExportZone loads the zone to export, writing the error response
+// itself on failure.
+func (h *ImportExportHandler) loadExportZone(ctx context.Context, w http.ResponseWriter, domain, view string) (*dns.Zone, bool) {
 	var zone *dns.Zone
 	var err error
 	if view != "" {
@@ -39,21 +64,23 @@ func (h *ImportExportHandler) handleExportZone(w http.ResponseWriter, r *http.Re
 	if err != nil {
 		if err == dns.ErrZoneNotFound {
 			writeError(w, http.StatusNotFound, "ZONE_NOT_FOUND", "Zone not found")
-			return
+			return nil, false
 		}
 		writeInternalError(w, "DB_ERROR", err)
-		return
+		return nil, false
 	}
+	return zone, true
+}
 
-	zone.EnsureSOA()
-
+// buildZoneFile renders zone as an RFC 1035 zone file: $ORIGIN/$TTL header,
+// the SOA record, then every other record via exportRecordToRR.
+func buildZoneFile(zone *dns.Zone) string {
 	var sb strings.Builder
 	sb.WriteString("$ORIGIN " + mdns.Fqdn(zone.Domain) + "\n")
-	sb.WriteString(fmt.Sprintf("$TTL %d\n", zone.TTL))
+	fmt.Fprintf(&sb, "$TTL %d\n", zone.TTL)
 
-	// SOA record
 	if zone.SOA != nil {
-		sb.WriteString(fmt.Sprintf("%s %d IN SOA %s %s %d %d %d %d %d\n",
+		fmt.Fprintf(&sb, "%s %d IN SOA %s %s %d %d %d %d %d\n",
 			mdns.Fqdn(zone.Domain),
 			zone.TTL,
 			mdns.Fqdn(zone.SOA.MName),
@@ -62,11 +89,9 @@ func (h *ImportExportHandler) handleExportZone(w http.ResponseWriter, r *http.Re
 			zone.SOA.Refresh,
 			zone.SOA.Retry,
 			zone.SOA.Expire,
-			zone.SOA.Minimum,
-		))
+			zone.SOA.Minimum)
 	}
 
-	// All other records
 	for _, rec := range zone.Records {
 		if rec.Type == dns.TypeFWD || rec.Type == dns.TypeSOA {
 			continue
@@ -77,18 +102,18 @@ func (h *ImportExportHandler) handleExportZone(w http.ResponseWriter, r *http.Re
 		}
 		sb.WriteString(rr.String() + "\n")
 	}
-
-	filename := domain + ".zone"
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
-	w.WriteHeader(http.StatusOK)
-	_, _ = io.WriteString(w, sb.String())
+	return sb.String()
 }
 
-// exportRecordToRR converts an internal dns.Record to a miekg/dns RR for zone file export.
+// exportRecordToRR converts an internal dns.Record to a miekg/dns RR for
+// zone file export, via the same dnsserver.BuildRR dispatch table used for
+// live DNS answers (dnsserver/zones.go) — see RRBuildContext's doc comment
+// for why the two callers share the per-type construction but not the
+// surrounding FQDN/TTL resolution.
 func exportRecordToRR(zone *dns.Zone, rec dns.Record) mdns.RR {
+	atApex := rec.Name == "@" || rec.Name == ""
 	var fqdn string
-	if rec.Name == "@" || rec.Name == "" {
+	if atApex {
 		fqdn = mdns.Fqdn(zone.Domain)
 	} else {
 		fqdn = mdns.Fqdn(rec.Name + "." + zone.Domain)
@@ -102,47 +127,10 @@ func exportRecordToRR(zone *dns.Zone, rec dns.Record) mdns.RR {
 		}
 	}
 
-	hdr := mdns.RR_Header{Name: fqdn, Class: mdns.ClassINET, Ttl: ttl}
-	switch rec.Type {
-	case dns.TypeA:
-		ip := net.ParseIP(rec.Value)
-		if ip == nil || ip.To4() == nil {
-			return nil
-		}
-		hdr.Rrtype = mdns.TypeA
-		return &mdns.A{Hdr: hdr, A: ip.To4()}
-	case dns.TypeAAAA:
-		ip := net.ParseIP(rec.Value)
-		if ip == nil {
-			return nil
-		}
-		hdr.Rrtype = mdns.TypeAAAA
-		return &mdns.AAAA{Hdr: hdr, AAAA: ip.To16()}
-	case dns.TypeCNAME:
-		hdr.Rrtype = mdns.TypeCNAME
-		return &mdns.CNAME{Hdr: hdr, Target: mdns.Fqdn(rec.Value)}
-	case dns.TypeMX:
-		hdr.Rrtype = mdns.TypeMX
-		return &mdns.MX{Hdr: hdr, Preference: uint16(rec.Priority), Mx: mdns.Fqdn(rec.Value)}
-	case dns.TypeTXT:
-		hdr.Rrtype = mdns.TypeTXT
-		return &mdns.TXT{Hdr: hdr, Txt: []string{rec.Value}}
-	case dns.TypeNS:
-		hdr.Rrtype = mdns.TypeNS
-		return &mdns.NS{Hdr: hdr, Ns: mdns.Fqdn(rec.Value)}
-	case dns.TypeSRV:
-		hdr.Rrtype = mdns.TypeSRV
-		return &mdns.SRV{Hdr: hdr, Priority: uint16(rec.Priority), Weight: uint16(rec.Weight), Port: uint16(rec.Port), Target: mdns.Fqdn(rec.Value)}
-	case dns.TypePTR:
-		hdr.Rrtype = mdns.TypePTR
-		return &mdns.PTR{Hdr: hdr, Ptr: mdns.Fqdn(rec.Value)}
-	case dns.TypeCAA:
-		hdr.Rrtype = mdns.TypeCAA
-		return &mdns.CAA{Hdr: hdr, Flag: uint8(rec.Priority), Tag: rec.Tag, Value: rec.Value}
-	case dns.TypeDNAME:
-		hdr.Rrtype = mdns.TypeDNAME
-		return &mdns.DNAME{Hdr: hdr, Target: mdns.Fqdn(rec.Value)}
-	default:
-		return nil
-	}
+	return dnsserver.BuildRR(dnsserver.RRBuildContext{
+		Hdr:      mdns.RR_Header{Name: fqdn, Class: mdns.ClassINET, Ttl: ttl},
+		Rec:      rec,
+		ZoneName: zone.Domain,
+		AtApex:   atApex,
+	})
 }

@@ -190,6 +190,10 @@ type DNSServerConfig struct {
 	DoT                 DoTConfig            `yaml:"dot" json:"dot"`
 	SplitHorizon        SplitHorizonConfig   `yaml:"split_horizon" json:"split_horizon"`
 	AXFR                AXFRConfig           `yaml:"axfr" json:"axfr"`
+	// AllowedNetworks is a client-network allowlist (CIDRs or bare IPs). When
+	// non-empty, only queries from these networks are answered; all other
+	// clients receive REFUSED. Empty (default) allows every client.
+	AllowedNetworks []string `yaml:"allowed_networks" json:"allowed_networks"`
 }
 
 // CacheConfig holds cache settings.
@@ -280,9 +284,16 @@ type SystemMetricsConfig struct {
 
 // SystemRateLimitConfig holds rate limiting settings.
 type SystemRateLimitConfig struct {
-	Enabled     bool `yaml:"enabled" json:"enabled"`
-	DNSQueries  int  `yaml:"dns_queries" json:"dns_queries"`
-	APIRequests int  `yaml:"api_requests" json:"api_requests"`
+	Enabled bool `yaml:"enabled" json:"enabled"`
+	// DNSQueries is the sustained DNS query allowance per minute per client IP
+	// (initial burst equals this value). 0 or negative disables DNS rate limiting.
+	DNSQueries int `yaml:"dns_queries" json:"dns_queries"`
+	// APIRequests is the sustained HTTP API request allowance per minute per client IP.
+	APIRequests int `yaml:"api_requests" json:"api_requests"`
+	// ExemptNetworks lists CIDRs or bare IPs that are never rate limited by the
+	// DNS limiter, e.g. the LAN router that forwards every household query from
+	// its own IP. Empty means no exemptions.
+	ExemptNetworks []string `yaml:"exempt_networks" json:"exempt_networks"`
 }
 
 // SystemSecurityConfig holds security settings.
@@ -379,6 +390,14 @@ func mergeMap(dst, src map[string]interface{}) map[string]interface{} {
 }
 
 func applyDefaults(cfg *Config) {
+	applyServerDefaults(cfg)
+	applyBlocklistDefaults(cfg)
+	applyClusterDefaults(cfg)
+	applyClusterEnvOverrides(cfg)
+	applyDHCPDefaults(cfg)
+}
+
+func applyServerDefaults(cfg *Config) {
 	if cfg.DNSServer.Listen == "" {
 		cfg.DNSServer.Listen = "[::]:53"
 	}
@@ -412,6 +431,12 @@ func applyDefaults(cfg *Config) {
 	if len(cfg.DNSServer.Upstream) == 0 {
 		cfg.DNSServer.Upstream = []string{"1.1.1.1", "8.8.8.8"}
 	}
+	if cfg.DNSServer.Cache.WarmupCount == 0 {
+		cfg.DNSServer.Cache.WarmupCount = 200
+	}
+}
+
+func applyBlocklistDefaults(cfg *Config) {
 	if cfg.Blocklist.FilePath == "" {
 		cfg.Blocklist.FilePath = "/var/lib/dns-stack/blocklist.hosts"
 	}
@@ -427,13 +452,14 @@ func applyDefaults(cfg *Config) {
 	if cfg.Blocklist.BlockMode == "" {
 		cfg.Blocklist.BlockMode = "zero_ip"
 	}
+}
 
-	// Cluster defaults
+func applyClusterDefaults(cfg *Config) {
 	if cfg.Cluster.Role == "" {
 		cfg.Cluster.Role = "master"
 	}
 	if cfg.Cluster.PushTimeout == 0 {
-		cfg.Cluster.PushTimeout = Duration(5 * time.Second)
+		cfg.Cluster.PushTimeout = Duration(30 * time.Second)
 	}
 	if cfg.Cluster.PollInterval == 0 {
 		cfg.Cluster.PollInterval = Duration(30 * time.Second)
@@ -441,9 +467,12 @@ func applyDefaults(cfg *Config) {
 	if cfg.Cluster.DataDir == "" {
 		cfg.Cluster.DataDir = "/var/lib/dns-stack/data"
 	}
+}
 
-	// Env vars override YAML — so each node can read its role from /etc/dns-stack/env
-	// without needing a node-specific config.yaml.
+// applyClusterEnvOverrides lets env vars override YAML cluster settings —
+// so each node can read its role from /etc/dns-stack/env without needing a
+// node-specific config.yaml.
+func applyClusterEnvOverrides(cfg *Config) {
 	if role := os.Getenv("DOMUDNS_CLUSTER_ROLE"); role == "master" || role == "slave" {
 		cfg.Cluster.Role = role
 	}
@@ -463,13 +492,9 @@ func applyDefaults(cfg *Config) {
 	if secret := os.Getenv("DOMUDNS_SYNC_SECRET"); secret != "" {
 		cfg.Cluster.SyncSecret = secret
 	}
+}
 
-	// Cache-Warmup Defaults
-	if cfg.DNSServer.Cache.WarmupCount == 0 {
-		cfg.DNSServer.Cache.WarmupCount = 200
-	}
-
-	// DHCP-Lease-Sync Defaults
+func applyDHCPDefaults(cfg *Config) {
 	if cfg.DHCPLeaseSync.TTL == 0 {
 		cfg.DHCPLeaseSync.TTL = 60
 	}

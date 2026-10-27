@@ -61,61 +61,83 @@ func (h *RecordsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "NOT_FOUND", "Unknown endpoint")
 		return
 	}
-	zoneDomain := parts[0]
-	if zoneDomain == "" {
-		writeError(w, http.StatusBadRequest, "INVALID_ZONE", "Domain required")
-		return
-	}
-	if !dns.IsValidDomain(zoneDomain) {
-		writeError(w, http.StatusBadRequest, "INVALID_ZONE", "Invalid domain name")
+
+	zoneDomain, ok := parseRecordsZoneDomain(w, r, parts[0])
+	if !ok {
 		return
 	}
 
-	// ?view= query parameter for split-horizon view zones.
-	// Internally "domain@view" is used as a composite key,
-	// which the FileStore processes transparently.
+	if h.routeRecordsCollection(w, r, parts, zoneDomain) {
+		return
+	}
+	if h.routeRecordsItem(w, r, parts, zoneDomain) {
+		return
+	}
+
+	writeError(w, http.StatusNotFound, "NOT_FOUND", "Unknown endpoint")
+}
+
+// parseRecordsZoneDomain validates the zone domain from the path and
+// applies the ?view= query parameter, composing the "domain@view" key the
+// FileStore expects internally. Writes the error response itself on failure.
+func parseRecordsZoneDomain(w http.ResponseWriter, r *http.Request, zoneDomain string) (string, bool) {
+	if zoneDomain == "" {
+		writeError(w, http.StatusBadRequest, "INVALID_ZONE", "Domain required")
+		return "", false
+	}
+	if !dns.IsValidDomain(zoneDomain) {
+		writeError(w, http.StatusBadRequest, "INVALID_ZONE", "Invalid domain name")
+		return "", false
+	}
+
 	view := r.URL.Query().Get("view")
 	if view != "" {
 		if !isValidViewName(view) {
 			writeError(w, http.StatusBadRequest, "INVALID_VIEW", "Invalid view name (only [a-z0-9_-] allowed)")
-			return
+			return "", false
 		}
 		zoneDomain = zoneDomain + "@" + view
 	}
+	return zoneDomain, true
+}
 
-	if len(parts) == 2 {
-		// /api/zones/example.com/records
-		switch r.Method {
-		case http.MethodGet:
-			h.list(r.Context(), w, zoneDomain)
-			return
-		case http.MethodPost:
-			h.create(r.Context(), w, r, zoneDomain)
-			return
-		}
+// routeRecordsCollection handles /api/zones/{zone}/records.
+func (h *RecordsHandler) routeRecordsCollection(w http.ResponseWriter, r *http.Request, parts []string, zoneDomain string) bool {
+	if len(parts) != 2 {
+		return false
 	}
-
-	if len(parts) == 3 {
-		// /api/zones/example.com/records/123
-		id, err := strconv.Atoi(parts[2])
-		if err != nil || id < 1 {
-			writeError(w, http.StatusBadRequest, "INVALID_RECORD", "Invalid record ID (must be positive integer)")
-			return
-		}
-		switch r.Method {
-		case http.MethodGet:
-			h.get(r.Context(), w, zoneDomain, id)
-			return
-		case http.MethodPut:
-			h.update(r.Context(), w, r, zoneDomain, id)
-			return
-		case http.MethodDelete:
-			h.delete(r.Context(), w, zoneDomain, id)
-			return
-		}
+	switch r.Method {
+	case http.MethodGet:
+		h.list(r.Context(), w, zoneDomain)
+	case http.MethodPost:
+		h.create(r.Context(), w, r, zoneDomain)
+	default:
+		return false
 	}
+	return true
+}
 
-	writeError(w, http.StatusNotFound, "NOT_FOUND", "Unknown endpoint")
+// routeRecordsItem handles /api/zones/{zone}/records/{id}.
+func (h *RecordsHandler) routeRecordsItem(w http.ResponseWriter, r *http.Request, parts []string, zoneDomain string) bool {
+	if len(parts) != 3 {
+		return false
+	}
+	id, err := strconv.Atoi(parts[2])
+	if err != nil || id < 1 {
+		writeError(w, http.StatusBadRequest, "INVALID_RECORD", "Invalid record ID (must be positive integer)")
+		return true
+	}
+	switch r.Method {
+	case http.MethodGet:
+		h.get(r.Context(), w, zoneDomain, id)
+	case http.MethodPut:
+		h.update(r.Context(), w, r, zoneDomain, id)
+	case http.MethodDelete:
+		h.delete(r.Context(), w, zoneDomain, id)
+	default:
+		return false
+	}
+	return true
 }
 
 func (h *RecordsHandler) list(ctx context.Context, w http.ResponseWriter, zoneDomain string) {
@@ -265,19 +287,6 @@ func (h *RecordsHandler) createAutoPTR(ctx context.Context, ip, fqdn string, ttl
 }
 
 func (h *RecordsHandler) update(ctx context.Context, w http.ResponseWriter, r *http.Request, zoneDomain string, id int) {
-	zone, err := h.store.GetZone(ctx, zoneDomain)
-	if err != nil {
-		if err == dns.ErrZoneNotFound {
-			writeError(w, http.StatusNotFound, "ZONE_NOT_FOUND", "Zone not found")
-			return
-		}
-		writeInternalError(w, "DB_ERROR", err)
-		return
-	}
-	if zone.RecordByID(id) == nil {
-		writeError(w, http.StatusNotFound, "RECORD_NOT_FOUND", "Record not found")
-		return
-	}
 	var record dns.Record
 	if err := DecodeJSON(r, &record, 0); err != nil {
 		if errors.Is(err, ErrJSONDepthExceeded) {
@@ -296,12 +305,38 @@ func (h *RecordsHandler) update(ctx context.Context, w http.ResponseWriter, r *h
 		writeError(w, http.StatusBadRequest, "INVALID_RECORD", err.Error())
 		return
 	}
-	if err := h.store.PutRecord(ctx, zoneDomain, &record); err != nil {
+
+	// zoneStore.UpdateZone holds a single write lock across the "does the
+	// record still exist" check and the actual replacement — a separate
+	// GetZone (to check) followed by PutRecord (to write) would leave that
+	// check unprotected against a concurrent delete/update of the same
+	// record. See internal/store/interfaces.go (ZoneWriter.UpdateZone).
+	err := h.zoneStore.UpdateZone(ctx, zoneDomain, "", func(zone *dns.Zone) error {
+		if zone.RecordByID(id) == nil {
+			return dns.ErrRecordNotFound
+		}
+		for i := range zone.Records {
+			if zone.Records[i].ID == id {
+				zone.Records[i] = record
+				break
+			}
+		}
+		if zone.SOA != nil {
+			zone.SOA.IncrementSerial()
+		}
+		return nil
+	})
+	switch {
+	case errors.Is(err, dns.ErrZoneNotFound):
+		writeError(w, http.StatusNotFound, "ZONE_NOT_FOUND", "Zone not found")
+	case errors.Is(err, dns.ErrRecordNotFound):
+		writeError(w, http.StatusNotFound, "RECORD_NOT_FOUND", "Record not found")
+	case err != nil:
 		writeInternalError(w, "DB_ERROR", err)
-		return
+	default:
+		h.triggerZoneReload()
+		writeSuccess(w, record, http.StatusOK)
 	}
-	h.triggerZoneReload()
-	writeSuccess(w, record, http.StatusOK)
 }
 
 func (h *RecordsHandler) delete(ctx context.Context, w http.ResponseWriter, zoneDomain string, id int) {

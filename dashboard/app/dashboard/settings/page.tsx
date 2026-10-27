@@ -1,12 +1,13 @@
 'use client'
 
-import { useEffect, useState, useCallback, FormEvent } from 'react'
+import { useEffect, useState, useCallback, useRef, FormEvent } from 'react'
+import { useApiRequest } from '@/lib/hooks/useApiRequest'
 import { Topbar } from '@/components/layout/Topbar'
 import { AnimatedModal } from '@/components/ui/animated-modal'
 import { MovingBorderButton } from '@/components/ui/moving-border'
 import { useToast } from '@/components/shared/Toast'
 import { InfoTooltip } from '@/components/shared/InfoTooltip'
-import { cn, fmtDate, BLOCKLIST_SUGGESTIONS } from '@/lib/utils'
+import { cn, fmtDate, getErrorMessage, BLOCKLIST_SUGGESTIONS } from '@/lib/utils'
 import {
   config as configApi,
   auth as authApi,
@@ -14,9 +15,15 @@ import {
   splitHorizon as splitHorizonApi,
   blocklist as blocklistApi,
   ddns as ddnsApi,
+  clientGroups as clientGroupsApi,
   listNamedAPIKeys,
   createNamedAPIKey,
   deleteNamedAPIKey,
+  getTLSACMEConfig,
+  setTLSACMEConfig,
+  getTLSACMEStatus,
+  triggerTLSRenewal,
+  getClusterInfo,
   type Config,
   type SplitHorizonConfig,
   type AXFRConfig,
@@ -26,20 +33,25 @@ import {
   type TSIGKeyCreateResponse,
   type NamedAPIKey,
   type CreateNamedAPIKeyResponse,
+  type ClientGroup,
+  type TLSACMEConfig,
+  type TLSACMEStatus,
 } from '@/lib/api'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type MainTab = 'dns' | 'blocklist' | 'ddns' | 'split-horizon' | 'zone-transfer' | 'dhcp' | 'system' | 'security'
+type MainTab = 'dns' | 'tls' | 'blocklist' | 'ddns' | 'split-horizon' | 'zone-transfer' | 'dhcp' | 'client-groups' | 'system' | 'security'
 type BlocklistSubTab = 'urls' | 'blocked' | 'allowed' | 'whitelist-ips' | 'patterns'
 
 const MAIN_TABS: { key: MainTab; label: string }[] = [
   { key: 'dns',           label: 'DNS Server' },
+  { key: 'tls',           label: 'TLS / Let\'s Encrypt' },
   { key: 'blocklist',     label: 'Blocklist' },
   { key: 'ddns',          label: 'DDNS' },
   { key: 'split-horizon', label: 'Split-Horizon' },
   { key: 'zone-transfer', label: 'Zone Transfer' },
   { key: 'dhcp',          label: 'DHCP Sync' },
+  { key: 'client-groups', label: 'Client-Gruppen' },
   { key: 'system',        label: 'System' },
   { key: 'security',      label: 'Sicherheit' },
 ]
@@ -158,12 +170,16 @@ function DNSTab({ cfg, onSaved }: { cfg: Config; onSaved: () => void }) {
             cert_file: (fd.get('dot_cert_file') as string) || undefined,
             key_file: (fd.get('dot_key_file') as string) || undefined,
           },
+          allowed_networks: ((fd.get('dns_acl') as string | null) ?? '')
+            .split(/[,\s]+/)
+            .map((s) => s.trim())
+            .filter(Boolean),
         },
       })
       showToast('DNS-Einstellungen gespeichert')
       onSaved()
     } catch (err: unknown) {
-      showToast(err instanceof Error ? err.message : 'Fehler', 'error')
+      showToast(getErrorMessage(err, 'Fehler'), 'error')
     } finally {
       setSaving(false)
     }
@@ -220,6 +236,17 @@ function DNSTab({ cfg, onSaved }: { cfg: Config; onSaved: () => void }) {
           <label className={labelCls}><span>DoH-Pfad</span></label>
           <input name="doh_path" defaultValue={doh.path ?? '/dns-query'} className={inputCls} placeholder="/dns-query" />
           <p className="text-xs text-[var(--muted)] mt-1">Standard: /dns-query · Neustart erforderlich</p>
+        </div>
+      </Card>
+
+      <Card title="Zugriffskontrolle (ACL)" subtitle="Nur diese Client-Netze dürfen den DNS-Server abfragen">
+        <div>
+          <label className={labelCls}>
+            <span>Erlaubte Netze (kommagetrennt)</span>
+            <InfoTooltip text="CIDRs oder einzelne IPs. Leer = alle Clients erlaubt (Standard). Ist die Liste gesetzt, erhalten alle anderen Clients REFUSED. Lokale Netze nicht vergessen, z. B. 192.168.0.0/16, 127.0.0.1, ::1. Aktive ACME-DNS-01-Challenges (_acme-challenge.*) bleiben ausgenommen, damit Let's Encrypt weiter funktioniert." />
+          </label>
+          <input name="dns_acl" defaultValue={(dns.allowed_networks ?? []).join(', ')} placeholder="192.168.0.0/16, 127.0.0.1, ::1" className={inputCls} />
+          <p className="text-xs text-[var(--muted)] mt-1">Leer lassen, um allen Clients Zugriff zu erlauben</p>
         </div>
       </Card>
 
@@ -281,7 +308,7 @@ function BlocklistTab({ cfg, onSaved }: { cfg: Config; onSaved: () => void }) {
       showToast('Blocklist-Einstellungen gespeichert')
       onSaved()
     } catch (err: unknown) {
-      showToast(err instanceof Error ? err.message : 'Fehler', 'error')
+      showToast(getErrorMessage(err, 'Fehler'), 'error')
     } finally {
       setSaving(false)
     }
@@ -367,6 +394,7 @@ function URLsTab() {
   const [loading, setLoading] = useState(true)
   const [addOpen, setAddOpen] = useState(false)
   const [newUrl, setNewUrl] = useState('')
+  const [newCategory, setNewCategory] = useState('')
   const [newEnabled, setNewEnabled] = useState(true)
   const [fetchingId, setFetchingId] = useState<number | null>(null)
   const [togglingId, setTogglingId] = useState<number | null>(null)
@@ -388,9 +416,9 @@ function URLsTab() {
     if (adding) return
     setAdding(true)
     try {
-      const res = await blocklistApi.addUrl({ url: newUrl.trim(), enabled: newEnabled })
+      const res = await blocklistApi.addUrl({ url: newUrl.trim(), category: newCategory || undefined, enabled: newEnabled })
       showToast('URL hinzugefügt')
-      setAddOpen(false); setNewUrl('')
+      setAddOpen(false); setNewUrl(''); setNewCategory('')
       if (newEnabled && res.data?.id) {
         showToast('Abruf läuft im Hintergrund …')
         try { await blocklistApi.fetchUrl(res.data.id) } catch {}
@@ -398,7 +426,7 @@ function URLsTab() {
       }
       await load()
     } catch (err: unknown) {
-      showToast(err instanceof Error ? err.message : 'Fehler', 'error')
+      showToast(getErrorMessage(err, 'Fehler'), 'error')
     } finally { setAdding(false) }
   }
 
@@ -410,7 +438,7 @@ function URLsTab() {
       showToast(enabled ? 'Deaktiviert' : 'Aktiviert')
       await load()
     } catch (err: unknown) {
-      showToast(err instanceof Error ? err.message : 'Fehler', 'error')
+      showToast(getErrorMessage(err, 'Fehler'), 'error')
     } finally { setTogglingId(null) }
   }
 
@@ -423,7 +451,7 @@ function URLsTab() {
       showToast('Blocklist abgerufen')
       await load()
     } catch (err: unknown) {
-      showToast(err instanceof Error ? err.message : 'Fehler', 'error')
+      showToast(getErrorMessage(err, 'Fehler'), 'error')
     } finally { setFetchingId(null) }
   }
 
@@ -436,7 +464,7 @@ function URLsTab() {
       showToast('URL gelöscht')
       await load()
     } catch (err: unknown) {
-      showToast(err instanceof Error ? err.message : 'Fehler', 'error')
+      showToast(getErrorMessage(err, 'Fehler'), 'error')
     } finally { setDeletingId(null) }
   }
 
@@ -455,7 +483,7 @@ function URLsTab() {
       showToast('Blocklist aktiviert')
       await load()
     } catch (err: unknown) {
-      showToast(err instanceof Error ? err.message : 'Fehler', 'error')
+      showToast(getErrorMessage(err, 'Fehler'), 'error')
     } finally { setActivatingUrl(null) }
   }
 
@@ -519,6 +547,9 @@ function URLsTab() {
                     <tr key={u.id} className="hover:bg-[var(--surface-3)] transition-colors">
                       <td className="px-4 py-3 max-w-xs">
                         <a href={u.url} target="_blank" rel="noopener noreferrer" className="text-amber-400 hover:text-amber-400 text-xs truncate block">{u.url}</a>
+                        {u.category && (
+                          <span className="inline-block mt-0.5 text-xs bg-amber-500/10 text-amber-400 px-2 py-0.5 rounded">{u.category}</span>
+                        )}
                       </td>
                       <td className="px-4 py-3">
                         <span className={cn('inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium', u.enabled ? 'bg-green-500/15 text-green-400' : 'bg-slate-500/15 text-slate-400')}>
@@ -556,6 +587,15 @@ function URLsTab() {
           <div>
             <label className="block text-xs font-semibold text-[var(--muted-2)] uppercase tracking-wider mb-2">URL</label>
             <input type="url" value={newUrl} onChange={(e) => setNewUrl(e.target.value)} placeholder="https://…" autoFocus className={inputCls} />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-[var(--muted-2)] uppercase tracking-wider mb-2">Kategorie</label>
+            <select value={newCategory} onChange={(e) => setNewCategory(e.target.value)} className={inputCls}>
+              <option value="">unkategorisiert</option>
+              {CLIENT_GROUP_CATEGORIES.map((cat) => (
+                <option key={cat} value={cat}>{cat}</option>
+              ))}
+            </select>
           </div>
           <label className="flex items-center gap-3 cursor-pointer">
             <input type="checkbox" checked={newEnabled} onChange={(e) => setNewEnabled(e.target.checked)} className="w-4 h-4" />
@@ -604,7 +644,7 @@ function DomainsTab({ mode }: { mode: 'blocked' | 'allowed' }) {
       setAddOpen(false); setNewDomain('')
       await load()
     } catch (err: unknown) {
-      showToast(err instanceof Error ? err.message : 'Fehler', 'error')
+      showToast(getErrorMessage(err, 'Fehler'), 'error')
     } finally { setAdding(false) }
   }
 
@@ -618,7 +658,7 @@ function DomainsTab({ mode }: { mode: 'blocked' | 'allowed' }) {
       showToast('Entfernt')
       await load()
     } catch (err: unknown) {
-      showToast(err instanceof Error ? err.message : 'Fehler', 'error')
+      showToast(getErrorMessage(err, 'Fehler'), 'error')
     } finally { setDeletingDomain(null) }
   }
 
@@ -703,7 +743,7 @@ function IPWhitelistTab() {
       setAddOpen(false); setNewIP('')
       await load()
     } catch (err: unknown) {
-      showToast(err instanceof Error ? err.message : 'Fehler', 'error')
+      showToast(getErrorMessage(err, 'Fehler'), 'error')
     } finally { setAdding(false) }
   }
 
@@ -716,7 +756,7 @@ function IPWhitelistTab() {
       showToast('Entfernt')
       await load()
     } catch (err: unknown) {
-      showToast(err instanceof Error ? err.message : 'Fehler', 'error')
+      showToast(getErrorMessage(err, 'Fehler'), 'error')
     } finally { setDeletingIP(null) }
   }
 
@@ -795,7 +835,7 @@ function PatternsTab() {
       setAddOpen(false); setNewPattern(''); setNewType('wildcard')
       await load()
     } catch (err: unknown) {
-      showToast(err instanceof Error ? err.message : 'Fehler', 'error')
+      showToast(getErrorMessage(err, 'Fehler'), 'error')
     } finally { setAdding(false) }
   }
 
@@ -808,7 +848,7 @@ function PatternsTab() {
       showToast('Pattern gelöscht')
       await load()
     } catch (err: unknown) {
-      showToast(err instanceof Error ? err.message : 'Fehler', 'error')
+      showToast(getErrorMessage(err, 'Fehler'), 'error')
     } finally { setDeletingId(null) }
   }
 
@@ -949,7 +989,7 @@ function DDNSTab() {
       setNewKey(resp.data)
       loadKeys()
     } catch (err: unknown) {
-      setCreateError(err instanceof Error ? err.message : 'Fehler beim Erstellen.')
+      setCreateError(getErrorMessage(err, 'Fehler beim Erstellen.'))
     } finally { setCreating(false) }
   }
 
@@ -961,7 +1001,7 @@ function DDNSTab() {
       setDeleteTarget(null)
       loadKeys()
     } catch (err: unknown) {
-      showToast(err instanceof Error ? err.message : 'Fehler beim Löschen.', 'error')
+      showToast(getErrorMessage(err, 'Fehler beim Löschen.'), 'error')
       setDeleteTarget(null)
     }
   }
@@ -1164,7 +1204,7 @@ function SplitHorizonTab() {
       setShConfig(updated)
       showToast('Split-Horizon gespeichert')
     } catch (err: unknown) {
-      showToast(err instanceof Error ? err.message : 'Fehler', 'error')
+      showToast(getErrorMessage(err, 'Fehler'), 'error')
     } finally { setSaving(false) }
   }
 
@@ -1237,7 +1277,7 @@ function ZoneTransferTab({ cfg, onSaved }: { cfg: Config; onSaved: () => void })
       showToast('Zone Transfer gespeichert')
       onSaved()
     } catch (err: unknown) {
-      showToast(err instanceof Error ? err.message : 'Fehler', 'error')
+      showToast(getErrorMessage(err, 'Fehler'), 'error')
     } finally { setSaving(false) }
   }
 
@@ -1314,14 +1354,19 @@ function SystemTab({ cfg, onSaved }: { cfg: Config; onSaved: () => void }) {
           log_level: (fd.get('log_level') as string) || undefined,
           rate_limit: {
             enabled: (f.querySelector('[name=rl_enabled]') as HTMLInputElement)?.checked,
+            dns_queries: parseInt(fd.get('rl_dns') as string) || undefined,
             api_requests: parseInt(fd.get('rl_api') as string) || undefined,
+            exempt_networks: ((fd.get('rl_exempt') as string | null) ?? '')
+              .split(',')
+              .map((s) => s.trim())
+              .filter(Boolean),
           },
         },
       })
       showToast('System-Einstellungen gespeichert')
       onSaved()
     } catch (err: unknown) {
-      showToast(err instanceof Error ? err.message : 'Fehler', 'error')
+      showToast(getErrorMessage(err, 'Fehler'), 'error')
     } finally { setSaving(false) }
   }
 
@@ -1340,9 +1385,23 @@ function SystemTab({ cfg, onSaved }: { cfg: Config; onSaved: () => void }) {
       </Card>
 
       <Card title="Rate-Limiting">
-        <ToggleRow label="Rate-Limit aktivieren" hint="Begrenzt API-Anfragen pro Minute pro IP — schützt vor Überlastung" tooltip="Begrenzt API-Anfragen pro Minute pro IP.">
+        <ToggleRow label="Rate-Limit aktivieren" hint="Begrenzt DNS- und API-Anfragen pro Minute pro IP — schützt vor Überlastung" tooltip="Begrenzt DNS-Abfragen und API-Requests pro Minute pro Client-IP.">
           <FormToggle name="rl_enabled" defaultChecked={!!rateLimit.enabled} />
         </ToggleRow>
+        <div>
+          <label className={labelCls}>
+            <span>Max. DNS-Anfragen / Minute</span>
+            <InfoTooltip text="Maximale DNS-Abfragen pro Client-IP innerhalb einer Minute. Bei Überschreitung antwortet der Server mit REFUSED. 0 deaktiviert die DNS-Begrenzung." />
+          </label>
+          <input name="rl_dns" type="number" defaultValue={rateLimit.dns_queries ?? 1000} min={0} className={inputCls} />
+        </div>
+        <div>
+          <label className={labelCls}>
+            <span>Ausgenommene Netze (DNS)</span>
+            <InfoTooltip text="Komma-getrennte CIDRs oder IPs, die nie DNS-limitiert werden — z. B. der Router, der alle Haushaltsanfragen von einer IP weiterleitet." />
+          </label>
+          <input name="rl_exempt" type="text" defaultValue={(rateLimit.exempt_networks ?? []).join(', ')} placeholder="192.0.2.1, 192.0.2.0/24" className={inputCls} />
+        </div>
         <div>
           <label className={labelCls}>
             <span>Max. API-Anfragen / Minute</span>
@@ -1433,7 +1492,250 @@ function DHCPSyncTab({ cfg }: { cfg: Config }) {
   )
 }
 
+// ─── TLS Tab ─────────────────────────────────────────────────────────────────
+
+function TLSTab() {
+  const { showToast } = useToast()
+
+  const [cfg, setCfg] = useState<TLSACMEConfig>({ enabled: false, domain: '', email: '', staging: false })
+  const [cfgLoading, setCfgLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [validationError, setValidationError] = useState('')
+
+  const [status, setStatus] = useState<TLSACMEStatus | null>(null)
+  const [statusLoading, setStatusLoading] = useState(true)
+  const [renewing, setRenewing] = useState(false)
+
+  const [isSlave, setIsSlave] = useState(false)
+
+  const shouldPollRef = useRef(false)
+
+  const loadData = useCallback(async () => {
+    try {
+      const [loadedCfg, loadedStatus, clusterInfo] = await Promise.all([
+        getTLSACMEConfig(),
+        getTLSACMEStatus(),
+        getClusterInfo(),
+      ])
+      setCfg(loadedCfg)
+      setStatus(loadedStatus)
+      setIsSlave(clusterInfo.role === 'slave')
+    } catch (err: unknown) {
+      showToast(getErrorMessage(err, 'Fehler beim Laden'), 'error')
+    } finally {
+      setCfgLoading(false)
+      setStatusLoading(false)
+    }
+  }, [showToast])
+
+  useEffect(() => { loadData() }, [loadData])
+
+  // Keep ref in sync so the stable interval can read the current polling condition
+  useEffect(() => {
+    shouldPollRef.current = !!status && (!!status.error || !status.valid_until)
+  }, [status])
+
+  // Stable interval — set up once, never reset on status updates
+  useEffect(() => {
+    const id = setInterval(async () => {
+      if (!shouldPollRef.current) return
+      try {
+        const s = await getTLSACMEStatus()
+        setStatus(s)
+      } catch { /* ignorieren */ }
+    }, 30_000)
+    return () => clearInterval(id)
+  }, [])
+
+  const handleSave = async () => {
+    setValidationError('')
+    if (cfg.enabled) {
+      if (!cfg.domain.trim()) { setValidationError('Domain ist erforderlich'); return }
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(cfg.email)) { setValidationError('Ungültige E-Mail-Adresse'); return }
+    }
+    setSaving(true)
+    try {
+      const saved = await setTLSACMEConfig(cfg)
+      setCfg(saved)
+      showToast('Konfiguration gespeichert')
+      const s = await getTLSACMEStatus()
+      setStatus(s)
+    } catch (err: unknown) {
+      showToast(getErrorMessage(err, 'Fehler beim Speichern'), 'error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleRenew = async () => {
+    if (renewing) return
+    setRenewing(true)
+    try {
+      await triggerTLSRenewal()
+      showToast('Renewal ausgelöst — Status aktualisiert sich automatisch')
+      const s = await getTLSACMEStatus()
+      setStatus(s)
+    } catch (err: unknown) {
+      showToast(getErrorMessage(err, 'Fehler beim Renewal'), 'error')
+    } finally {
+      setRenewing(false)
+    }
+  }
+
+  const daysRemaining = status?.valid_until
+    ? Math.ceil((new Date(status.valid_until).getTime() - Date.now()) / 86_400_000)
+    : null
+
+  const validityColor =
+    daysRemaining === null ? '' :
+    daysRemaining >= 30 ? 'text-green-400' :
+    daysRemaining >= 10 ? 'text-yellow-400' :
+    'text-red-400'
+
+  if (cfgLoading || statusLoading) {
+    return <div className="flex items-center gap-2 text-[var(--muted)] text-sm mt-8"><Spinner /> Laden …</div>
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Konfiguration */}
+      <Card
+        title="Let's Encrypt (ACME DNS-01)"
+        subtitle="Automatisches TLS-Zertifikat via ACME DNS-01 Challenge"
+      >
+        {isSlave && (
+          <div className="mb-4 px-4 py-3 rounded-xl border border-sky-500/30 bg-sky-500/10 text-sky-300 text-sm">
+            Slave-Modus: Konfiguration ist schreibgeschützt. Zertifikat wird automatisch vom Master synchronisiert.
+          </div>
+        )}
+        <ToggleRow
+          label="Aktiviert"
+          hint="Let's Encrypt Zertifikat automatisch beziehen und erneuern"
+        >
+          <ToggleSwitch
+            checked={cfg.enabled}
+            onChange={(v) => setCfg(c => ({ ...c, enabled: v }))}
+            disabled={isSlave}
+          />
+        </ToggleRow>
+        <div className="grid grid-cols-2 gap-4 mt-4">
+          <div>
+            <label className={labelCls}>
+              Domain{' '}
+              <InfoTooltip text="FQDN für das Zertifikat, z.B. dns.example.com. Kein Wildcard." />
+            </label>
+            <input
+              type="text"
+              value={cfg.domain}
+              onChange={(e) => setCfg(c => ({ ...c, domain: e.target.value }))}
+              placeholder="dns.example.com"
+              className={inputCls}
+              disabled={isSlave}
+            />
+          </div>
+          <div>
+            <label className={labelCls}>
+              E-Mail{' '}
+              <InfoTooltip text="Kontaktadresse für Let's Encrypt (Ablaufbenachrichtigungen)." />
+            </label>
+            <input
+              type="email"
+              value={cfg.email}
+              onChange={(e) => setCfg(c => ({ ...c, email: e.target.value }))}
+              placeholder="admin@example.com"
+              className={inputCls}
+              disabled={isSlave}
+            />
+          </div>
+        </div>
+        <div className="mt-4">
+          <ToggleRow
+            label="Staging-Modus"
+            hint="Let's Encrypt Test-CA verwenden — kein echtes Zertifikat, nur zum Testen"
+          >
+            <ToggleSwitch
+              checked={cfg.staging}
+              onChange={(v) => setCfg(c => ({ ...c, staging: v }))}
+              disabled={isSlave}
+            />
+          </ToggleRow>
+        </div>
+        {validationError && (
+          <p className="mt-3 text-sm text-red-400">{validationError}</p>
+        )}
+        {!isSlave && (
+          <div className="mt-4 flex justify-end">
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="px-4 py-2 rounded-xl bg-[var(--accent)]/10 border border-[var(--accent)]/30 text-sm text-[var(--accent)] hover:bg-[var(--accent)]/20 disabled:opacity-50 transition-colors flex items-center gap-2"
+            >
+              {saving ? <><Spinner /> Speichern …</> : 'Speichern'}
+            </button>
+          </div>
+        )}
+      </Card>
+
+      {/* Zertifikat-Status */}
+      <Card
+        title="Zertifikat-Status"
+        subtitle="Aktuelles Zertifikat und letzter Renewal"
+        headerRight={
+          !isSlave ? (
+            <button
+              onClick={handleRenew}
+              disabled={renewing}
+              className="px-3 py-1.5 rounded-lg text-xs border border-[var(--border)] text-[var(--muted-2)] hover:text-[var(--text)] disabled:opacity-50 transition-colors"
+            >
+              {renewing ? '↻ Wird ausgelöst …' : '↻ Jetzt erneuern'}
+            </button>
+          ) : undefined
+        }
+      >
+        {!status?.valid_until ? (
+          <p className="text-sm text-[var(--muted)] italic">
+            Noch kein Zertifikat — wird nach dem Speichern der Konfiguration automatisch ausgestellt.
+          </p>
+        ) : (
+          <div className="grid grid-cols-3 gap-3">
+            <div className="bg-[var(--surface)] rounded-xl p-3">
+              <div className="text-xs text-[var(--muted)] mb-1">Domain</div>
+              <div className="text-sm text-[var(--text)] font-mono truncate">{status.domain ?? '—'}</div>
+            </div>
+            <div className="bg-[var(--surface)] rounded-xl p-3">
+              <div className="text-xs text-[var(--muted)] mb-1">Gültig bis</div>
+              <div className={`text-sm font-mono ${validityColor}`}>
+                {new Date(status.valid_until).toLocaleDateString('de-DE', { dateStyle: 'medium' })}
+              </div>
+              {daysRemaining !== null && (
+                <div className="text-xs text-[var(--muted)] mt-0.5">{daysRemaining} Tage verbleibend</div>
+              )}
+            </div>
+            <div className="bg-[var(--surface)] rounded-xl p-3">
+              <div className="text-xs text-[var(--muted)] mb-1">Letzter Renewal</div>
+              <div className="text-sm text-[var(--text)] font-mono">
+                {status.last_renewed
+                  ? new Date(status.last_renewed).toLocaleDateString('de-DE', { dateStyle: 'medium' })
+                  : '—'}
+              </div>
+            </div>
+          </div>
+        )}
+        {!!status?.error && (
+          <div className="mt-3 px-4 py-3 rounded-xl border border-red-900/50 bg-red-900/20 text-sm text-red-400">
+            Renewal-Fehler: {status.error}
+          </div>
+        )}
+      </Card>
+    </div>
+  )
+}
+
 // ─── Security Tab ───────────────────────────────────────────────────────────
+
+// Statisches Beispiel für die PowerDNS-kompatible API (siehe docs/powerdns-compat.md).
+// Platzhalter <key>/<host> — keine echten Werte, da Domain/Key-Name kontextabhängig sind.
+const PDNS_EXAMPLE_CURL = 'curl -H "X-API-Key: <key>" https://<host>/api/v1/servers/localhost/zones'
 
 function SecurityTab() {
   const { showToast } = useToast()
@@ -1454,6 +1756,7 @@ function SecurityTab() {
   const [creatingNamedKey, setCreatingNamedKey] = useState(false)
   const [createdKey, setCreatedKey] = useState<CreateNamedAPIKeyResponse | null>(null)
   const [copied, setCopied] = useState(false)
+  const [pdnsExampleCopied, setPdnsExampleCopied] = useState(false)
 
   const loadNamedKeys = useCallback(async () => {
     try {
@@ -1477,7 +1780,7 @@ function SecurityTab() {
       showToast('Passwort erfolgreich geändert')
       setPwOpen(false); setCurPw(''); setNewPw('')
     } catch (err: unknown) {
-      showToast(err instanceof Error ? err.message : 'Fehler', 'error')
+      showToast(getErrorMessage(err, 'Fehler'), 'error')
     } finally { setChangingPassword(false) }
   }
 
@@ -1490,7 +1793,7 @@ function SecurityTab() {
       setNewKey(key)
       if (key) setApiKey(key)
     } catch (err: unknown) {
-      showToast(err instanceof Error ? err.message : 'Fehler', 'error')
+      showToast(getErrorMessage(err, 'Fehler'), 'error')
     } finally { setGeneratingKey(false) }
   }
 
@@ -1505,7 +1808,7 @@ function SecurityTab() {
       setNewNamedKeyDesc('')
       await loadNamedKeys()
     } catch (err: unknown) {
-      showToast(err instanceof Error ? err.message : 'Fehler beim Erstellen', 'error')
+      showToast(getErrorMessage(err, 'Fehler beim Erstellen'), 'error')
     } finally { setCreatingNamedKey(false) }
   }
 
@@ -1515,7 +1818,7 @@ function SecurityTab() {
       showToast(`API-Schlüssel "${name}" gelöscht`)
       await loadNamedKeys()
     } catch (err: unknown) {
-      showToast(err instanceof Error ? err.message : 'Fehler beim Löschen', 'error')
+      showToast(getErrorMessage(err, 'Fehler beim Löschen'), 'error')
     }
   }
 
@@ -1524,6 +1827,13 @@ function SecurityTab() {
     navigator.clipboard.writeText(createdKey.key).then(() => {
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
+    })
+  }
+
+  const handleCopyPdnsExample = () => {
+    navigator.clipboard.writeText(PDNS_EXAMPLE_CURL).then(() => {
+      setPdnsExampleCopied(true)
+      setTimeout(() => setPdnsExampleCopied(false), 2000)
     })
   }
 
@@ -1581,6 +1891,41 @@ function SecurityTab() {
         >
           + Neuer API-Schlüssel
         </button>
+
+        <details className="group mt-4 rounded-xl border border-[var(--border)] bg-[var(--surface)]">
+          <summary className="flex cursor-pointer select-none items-center justify-between px-4 py-3 text-sm font-medium text-[var(--text)]">
+            <span>PowerDNS-kompatible API für Proxmox/acme.sh</span>
+            <span className="text-[var(--muted)] transition-transform group-open:rotate-180">▾</span>
+          </summary>
+          <div className="space-y-3 px-4 pb-4">
+            <p className="text-xs text-[var(--muted)]">
+              Für ACME-DNS-01-Challenges über Drittwerkzeuge, die eine PowerDNS-API erwarten
+              (z. B. das Proxmox VE Plugin &bdquo;DNS-01 PowerDNS API&rdquo; oder acme.sh mit{' '}
+              <code className="text-[var(--muted-2)]">dns_pdns</code>), stellt DomU DNS unter{' '}
+              <code className="text-[var(--muted-2)]">/api/v1/servers/{'{server_id}'}/zones</code> einen
+              kompatiblen Endpunkt bereit. Der frühere Pfad {' '}
+              <code className="text-[var(--muted-2)]">/api/pdns/v1/servers/{'{server_id}'}/zones</code> funktioniert
+              weiterhin als Alias. Authentifizierung erfolgt über einen der oben angelegten
+              API-Schlüssel, per <code className="text-[var(--muted-2)]">X-API-Key</code>-Header statt{' '}
+              <code className="text-[var(--muted-2)]">Authorization: Bearer</code>.
+            </p>
+            <div className="flex items-start gap-2">
+              <pre className="flex-1 overflow-x-auto rounded-lg border border-[var(--border)] bg-black/30 px-3 py-2 font-mono text-xs text-amber-400">
+                {PDNS_EXAMPLE_CURL}
+              </pre>
+              <button
+                onClick={handleCopyPdnsExample}
+                className="shrink-0 px-3 py-2 rounded-lg bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--muted-2)] hover:text-[var(--text)] hover:border-[var(--muted)] transition-colors"
+              >
+                {pdnsExampleCopied ? 'Kopiert ✓' : 'Kopieren'}
+              </button>
+            </div>
+            <p className="text-xs text-[var(--muted)]">
+              Ausführliche Dokumentation: siehe <code className="text-[var(--muted-2)]">docs/powerdns-compat.md</code>{' '}
+              im Repository.
+            </p>
+          </div>
+        </details>
       </Card>
 
       <AnimatedModal isOpen={pwOpen} onClose={() => setPwOpen(false)} title="Passwort ändern">
@@ -1695,6 +2040,171 @@ function SecurityTab() {
   )
 }
 
+// ─── Client Groups Tab ────────────────────────────────────────────────────────
+
+const CLIENT_GROUP_CATEGORIES = ['ads', 'malware', 'adult', 'social', 'gambling', 'tracking'] as const
+type ClientGroupCategory = typeof CLIENT_GROUP_CATEGORIES[number]
+
+function ClientGroupsTab() {
+  const { showToast } = useToast()
+  const [groups, setGroups] = useState<ClientGroup[]>([])
+  const [showAdd, setShowAdd] = useState(false)
+  const [newName, setNewName] = useState('')
+  const [newCIDRs, setNewCIDRs] = useState('')
+  const [newCats, setNewCats] = useState<ClientGroupCategory[]>([])
+  const [saving, setSaving] = useState(false)
+  const [addError, setAddError] = useState('')
+  const [deletingName, setDeletingName] = useState<string | null>(null)
+
+  const { data: groupsData, loading, refetch: load } = useApiRequest(() => clientGroupsApi.get())
+  useEffect(() => { if (groupsData) setGroups(groupsData.data ?? []) }, [groupsData])
+
+  const handleAdd = async () => {
+    if (saving) return
+    setAddError('')
+    const name = newName.trim()
+    if (!name) { setAddError('Gruppenname erforderlich'); return }
+    const cidrs = newCIDRs.split(',').map((s) => s.trim()).filter(Boolean)
+    if (cidrs.length === 0) { setAddError('Mindestens eine CIDR-Adresse erforderlich'); return }
+    const newGroup: ClientGroup = { name, cidrs, categories: newCats }
+    setSaving(true)
+    try {
+      const fresh = await clientGroupsApi.get()
+      await clientGroupsApi.set([...(fresh.data ?? []), newGroup])
+      setShowAdd(false)
+      setNewName('')
+      setNewCIDRs('')
+      setNewCats([])
+      await load()
+      showToast('Gruppe gespeichert', 'success')
+    } catch (err: unknown) {
+      setAddError(getErrorMessage(err, 'Fehler beim Speichern'))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleDelete = async (name: string) => {
+    if (!confirm(`Gruppe "${name}" löschen?`)) return
+    if (deletingName !== null) return
+    setDeletingName(name)
+    try {
+      const fresh = await clientGroupsApi.get()
+      await clientGroupsApi.set((fresh.data ?? []).filter((g) => g.name !== name))
+      await load()
+      showToast('Gruppe gelöscht', 'success')
+    } catch {
+      showToast('Fehler beim Löschen', 'error')
+    } finally {
+      setDeletingName(null)
+    }
+  }
+
+  const toggleCat = (cat: ClientGroupCategory, checked: boolean) => {
+    setNewCats((prev) => checked ? [...prev, cat] : prev.filter((c) => c !== cat))
+  }
+
+  if (loading) return <div className="flex items-center justify-center h-32"><div className="w-6 h-6 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" /></div>
+
+  return (
+    <div className="space-y-4 max-w-2xl">
+      <Card
+        title="Client-Gruppen"
+        subtitle="Weise Clients (nach IP/CIDR) spezifische Blocklist-Kategorien zu. Clients ohne Gruppe erhalten die Standardkategorien ads + malware."
+        headerRight={
+          <MovingBorderButton onClick={() => { setShowAdd((v) => !v); setAddError('') }}>
+            + Gruppe hinzufügen
+          </MovingBorderButton>
+        }
+      >
+        {showAdd && (
+          <div className="space-y-3 p-4 bg-[var(--surface)] rounded-xl border border-[var(--border)]">
+            <div>
+              <label className={labelCls}>Gruppenname</label>
+              <input
+                className={inputCls}
+                placeholder="z. B. kinder"
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className={labelCls}>CIDRs (kommagetrennt)</label>
+              <input
+                className={inputCls}
+                placeholder="z. B. 192.168.2.0/24, 10.0.1.5/32"
+                value={newCIDRs}
+                onChange={(e) => setNewCIDRs(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className={labelCls}>Aktive Blocklist-Kategorien</label>
+              <div className="flex flex-wrap gap-3">
+                {CLIENT_GROUP_CATEGORIES.map((cat) => (
+                  <label key={cat} className="flex items-center gap-1.5 text-sm text-[var(--muted-2)] cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={newCats.includes(cat)}
+                      onChange={(e) => toggleCat(cat, e.target.checked)}
+                      className="w-4 h-4"
+                    />
+                    {cat}
+                  </label>
+                ))}
+              </div>
+            </div>
+            {addError && <p className="text-red-400 text-sm">{addError}</p>}
+            <div className="flex gap-3 pt-1">
+              <button
+                onClick={() => { setShowAdd(false); setAddError('') }}
+                disabled={saving}
+                className="flex-1 px-4 py-2 rounded-xl border border-[var(--border)] text-[var(--muted-2)] text-sm hover:text-[var(--text)] disabled:opacity-50 transition-colors"
+              >
+                Abbrechen
+              </button>
+              <MovingBorderButton onClick={handleAdd} disabled={saving} className="flex-1">
+                {saving ? <span className="flex items-center justify-center gap-2"><Spinner /> Speichert …</span> : 'Speichern'}
+              </MovingBorderButton>
+            </div>
+          </div>
+        )}
+
+        {groups.length === 0 && !showAdd && (
+          <p className="text-[var(--muted)] text-sm py-2">
+            Keine Gruppen konfiguriert. Fallback: Kategorien <span className="text-amber-400">ads</span> + <span className="text-amber-400">malware</span> für alle Clients.
+          </p>
+        )}
+
+        {groups.map((g) => {
+          const isDeleting = deletingName === g.name
+          return (
+            <div key={g.name} className="flex items-start justify-between gap-4 py-3 border-t border-[var(--border)]">
+              <div className="min-w-0">
+                <div className="text-sm font-semibold text-[var(--text)]">{g.name}</div>
+                <div className="flex flex-wrap gap-1 mt-1">
+                  {g.cidrs.map((c) => (
+                    <span key={c} className="text-xs bg-[var(--surface)] text-[var(--muted-2)] px-2 py-0.5 rounded border border-[var(--border)]">{c}</span>
+                  ))}
+                  {g.categories.map((c) => (
+                    <span key={c} className="text-xs bg-amber-500/10 text-amber-400 px-2 py-0.5 rounded">{c}</span>
+                  ))}
+                </div>
+              </div>
+              <button
+                onClick={() => handleDelete(g.name)}
+                disabled={isDeleting}
+                className="shrink-0 flex items-center gap-1 text-xs text-red-400 hover:text-red-300 disabled:opacity-50 px-2 py-1 rounded border border-red-500/30 transition-colors"
+              >
+                {isDeleting ? <><Spinner /> …</> : 'Löschen'}
+              </button>
+            </div>
+          )
+        })}
+      </Card>
+    </div>
+  )
+}
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function SettingsPage() {
@@ -1753,11 +2263,13 @@ export default function SettingsPage() {
         {cfg && (
           <>
             {activeTab === 'dns'           && <DNSTab cfg={cfg} onSaved={loadConfig} />}
+            {activeTab === 'tls'           && <TLSTab />}
             {activeTab === 'blocklist'     && <BlocklistTab cfg={cfg} onSaved={loadConfig} />}
             {activeTab === 'ddns'          && <DDNSTab />}
             {activeTab === 'split-horizon' && <SplitHorizonTab />}
             {activeTab === 'zone-transfer' && <ZoneTransferTab cfg={cfg} onSaved={loadConfig} />}
             {activeTab === 'dhcp'          && <DHCPSyncTab cfg={cfg} />}
+            {activeTab === 'client-groups' && <ClientGroupsTab />}
             {activeTab === 'system'        && <SystemTab cfg={cfg} onSaved={loadConfig} />}
             {activeTab === 'security'      && <SecurityTab />}
           </>

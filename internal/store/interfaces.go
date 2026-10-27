@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"crypto"
 	"time"
 
 	"github.com/mw7101/domudns/internal/dns"
@@ -23,7 +24,7 @@ type BlocklistReader interface {
 
 // BlocklistWriter provides write access to blocklist data.
 type BlocklistWriter interface {
-	AddBlocklistURL(ctx context.Context, url string, enabled bool) (*BlocklistURL, error)
+	AddBlocklistURL(ctx context.Context, url string, category string, enabled bool) (*BlocklistURL, error)
 	RemoveBlocklistURL(ctx context.Context, id int) error
 	SetBlocklistURLEnabled(ctx context.Context, id int, enabled bool) error
 	UpdateBlocklistURLFetch(ctx context.Context, id int, lastError *string) error
@@ -60,6 +61,22 @@ type ZoneWriter interface {
 	PutZone(ctx context.Context, zone *dns.Zone) error
 	DeleteZone(ctx context.Context, domain string) error
 	DeleteZoneView(ctx context.Context, domain, view string) error
+
+	// UpdateZone atomically loads, mutates, and persists a zone under a
+	// single write lock — unlike a GetZone+PutZone pair, which each take
+	// their own separate lock and leave the calling business logic
+	// unprotected in between (TOCTOU/lost-update window: a concurrent
+	// writer can commit between the two calls and be silently overwritten).
+	//
+	// mutate receives the current zone (identified by domain, or domain+view
+	// for a split-horizon zone) and may modify it in place. If mutate
+	// returns a non-nil error, the zone is left untouched and that error is
+	// returned unchanged — callers can distinguish their own validation
+	// errors from failures.
+	//
+	// If no matching zone exists, UpdateZone returns dns.ErrZoneNotFound
+	// without invoking mutate (mirrors GetZone's error semantics).
+	UpdateZone(ctx context.Context, domain, view string, mutate func(zone *dns.Zone) error) error
 }
 
 // ZoneStore provides full read/write access to zone data.
@@ -133,4 +150,29 @@ type NamedAPIKeyStore interface {
 	ListNamedAPIKeys(ctx context.Context) ([]NamedAPIKey, error)
 	DeleteNamedAPIKey(ctx context.Context, id string) error
 	ValidateNamedAPIKey(ctx context.Context, key string) bool
+}
+
+// ---------------------------------------------------------------------------
+// Client Groups
+// ---------------------------------------------------------------------------
+
+// ClientGroupStore provides read/write access to client group policies.
+type ClientGroupStore interface {
+	GetClientGroups(ctx context.Context) ([]*dns.ClientGroup, error)
+	SetClientGroups(ctx context.Context, groups []*dns.ClientGroup) error
+}
+
+// ---------------------------------------------------------------------------
+// TLS ACME
+// ---------------------------------------------------------------------------
+
+// TLSACMEStore defines persistence operations for ACME TLS configuration.
+// Placed in interfaces.go (consistent with other store interfaces) rather than types.go.
+type TLSACMEStore interface {
+	GetTLSACMEConfig(ctx context.Context) (*TLSACMEConfig, error)
+	SetTLSACMEConfig(ctx context.Context, cfg *TLSACMEConfig) error
+	GetTLSCert(ctx context.Context) (*TLSCertPayload, error)
+	SetTLSCert(ctx context.Context, payload *TLSCertPayload) error
+	GetACMEAccountKey(ctx context.Context) (crypto.Signer, error) // nil if not present
+	SetACMEAccountKey(ctx context.Context, key crypto.Signer) error
 }

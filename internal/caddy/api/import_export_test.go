@@ -374,3 +374,28 @@ func TestRRsToZone_ExtractsSOA(t *testing.T) {
 		t.Errorf("len(Records) = %d, want 1 (SOA not counted as record)", len(zone.Records))
 	}
 }
+
+func TestRRsToZone_SkipsOutOfZoneRecords(t *testing.T) {
+	rrs := []mdns.RR{
+		&mdns.A{
+			Hdr: mdns.RR_Header{Name: "www.other.net.", Rrtype: mdns.TypeA, Ttl: 300},
+			A:   []byte{192, 0, 2, 10},
+		},
+		&mdns.TXT{
+			Hdr: mdns.RR_Header{Name: "_acme-challenge.pve-node.example.com.", Rrtype: mdns.TypeTXT, Ttl: 300},
+			Txt: []string{"sometoken"},
+		},
+	}
+
+	zone := rrsToZone(rrs, "example.com", "")
+
+	if len(zone.Records) != 1 {
+		t.Fatalf("len(Records) = %d, want 1 (out-of-zone RR must be skipped)", len(zone.Records))
+	}
+	if zone.Records[0].Name != "_acme-challenge.pve-node" {
+		t.Errorf("Name = %q, want _acme-challenge.pve-node", zone.Records[0].Name)
+	}
+	if zone.Records[0].Type != dns.TypeTXT {
+		t.Errorf("Type = %v, want TXT", zone.Records[0].Type)
+	}
+}

@@ -15,6 +15,20 @@ import (
 type FileStore struct {
 	dataDir string
 	mu      sync.RWMutex
+
+	// domainsMetaCache caches per-URL domain-set checksums keyed by urlID,
+	// invalidated by file size+mtime, so the periodic cluster poll does not
+	// re-hash unchanged gzip files. Guarded by domainsMetaMu (separate from
+	// mu, since it never touches the store's shared JSON files).
+	domainsMetaMu    sync.Mutex
+	domainsMetaCache map[int]domainMetaCacheEntry
+}
+
+// domainMetaCacheEntry is one cached per-URL domain-file checksum.
+type domainMetaCacheEntry struct {
+	size  int64
+	mtime int64
+	sha   string
 }
 
 // NewFileStore creates a new FileStore with the specified data directory.
@@ -31,9 +45,10 @@ func (s *FileStore) ensureDirs() error {
 	dirs := []string{
 		filepath.Join(s.dataDir, "zones"),
 		filepath.Join(s.dataDir, "blocklist", "url_domains"),
+		filepath.Join(s.dataDir, "tls"),
 	}
 	for _, d := range dirs {
-		if err := os.MkdirAll(d, 0755); err != nil {
+		if err := os.MkdirAll(d, 0750); err != nil {
 			return fmt.Errorf("mkdir %s: %w", d, err)
 		}
 	}
@@ -56,11 +71,6 @@ func (s *FileStore) HealthCheck(ctx context.Context) error {
 // zonesDir returns the path to the zones directory.
 func (s *FileStore) zonesDir() string {
 	return filepath.Join(s.dataDir, "zones")
-}
-
-// blocklistDir returns the path to the blocklist directory.
-func (s *FileStore) blocklistDir() string {
-	return filepath.Join(s.dataDir, "blocklist")
 }
 
 // urlDomainsDir returns the path to the URL domains directory.
@@ -106,4 +116,29 @@ func (s *FileStore) whitelistIPsPath() string {
 // patternsPath returns the path to the blocklist patterns file.
 func (s *FileStore) patternsPath() string {
 	return filepath.Join(s.dataDir, "blocklist", "patterns.json")
+}
+
+// tlsDir returns the path to the TLS directory.
+func (s *FileStore) tlsDir() string {
+	return filepath.Join(s.dataDir, "tls")
+}
+
+// tlsACMEConfigPath returns the path to the ACME config file.
+func (s *FileStore) tlsACMEConfigPath() string {
+	return filepath.Join(s.dataDir, "tls_acme.json")
+}
+
+// tlsCertPath returns the path to the TLS certificate file.
+func (s *FileStore) tlsCertPath() string {
+	return filepath.Join(s.tlsDir(), "cert.pem")
+}
+
+// tlsKeyPath returns the path to the TLS private key file.
+func (s *FileStore) tlsKeyPath() string {
+	return filepath.Join(s.tlsDir(), "key.pem")
+}
+
+// acmeAccountKeyPath returns the path to the ACME account key file.
+func (s *FileStore) acmeAccountKeyPath() string {
+	return filepath.Join(s.tlsDir(), "acme_account.key")
 }

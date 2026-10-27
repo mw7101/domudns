@@ -10,17 +10,11 @@ import (
 	"github.com/mw7101/domudns/internal/dns"
 )
 
-// isValidViewName checks whether a view name is valid: only [a-z0-9_-], max 64 characters.
+// isValidViewName checks whether a view name is valid: only [a-z0-9_-], max
+// 64 characters. Thin wrapper so call sites in this package (and its tests)
+// keep the short unexported name; the actual charset lives in dns.IsValidViewName.
 func isValidViewName(name string) bool {
-	if len(name) == 0 || len(name) > 64 {
-		return false
-	}
-	for _, c := range name {
-		if !((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '-') {
-			return false
-		}
-	}
-	return true
+	return dns.IsValidViewName(name)
 }
 
 // sanitizeZoneFilename returns the filename for a zone.
@@ -97,6 +91,36 @@ func (s *FileStore) PutZone(_ context.Context, zone *dns.Zone) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.saveZoneFile(zone)
+}
+
+// UpdateZone loads a zone, applies mutate, and — only if mutate succeeds —
+// persists the result, all under a single lock held for the entire
+// operation. This closes the TOCTOU/lost-update window that a separate
+// GetZone + PutZone pair leaves open: with two locks, any business logic
+// run between them by the caller is unprotected, so a concurrent writer can
+// commit in that window and be silently overwritten by the later PutZone.
+//
+// If mutate returns an error, nothing is written. If no matching zone
+// exists, mutate is never called and dns.ErrZoneNotFound is returned
+// (mirrors GetZone/GetZoneView).
+func (s *FileStore) UpdateZone(_ context.Context, domain, view string, mutate func(*dns.Zone) error) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var zone *dns.Zone
+	var err error
+	if view != "" {
+		zone, err = s.loadZoneViewFile(domain, view)
+	} else {
+		zone, err = s.loadZoneFile(domain)
+	}
+	if err != nil {
+		return err
+	}
+	if err := mutate(zone); err != nil {
+		return err
+	}
 	return s.saveZoneFile(zone)
 }
 

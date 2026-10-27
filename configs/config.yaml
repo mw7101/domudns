@@ -11,6 +11,15 @@ dnsserver:
     - "1.1.1.1"
     - "8.8.8.8"
 
+  # Client-network access control (ACL). Empty list = every client is allowed.
+  # When set, only queries from these CIDRs/IPs are answered; all others get
+  # REFUSED. Include local networks if needed (e.g. 127.0.0.1, ::1).
+  allowed_networks: []
+  # allowed_networks:
+  #   - "192.168.0.0/16"
+  #   - "127.0.0.1"
+  #   - "::1"
+
   # DNS Cache settings
   cache:
     enabled: true
@@ -53,8 +62,11 @@ dnsserver:
 
 # Caddy Web Server Settings
 caddy:
-  # Listen address: port 80 for HTTP (no TLS), port 443 for HTTPS (with TLS certificates)
-  listen: "0.0.0.0:80"
+  # Listen address: leave unset for auto-detection.
+  #   HTTP :80  — when no TLS certificate is available (initial setup, ACME pending)
+  #   HTTPS :443 — when a TLS certificate is loaded (static cert files or ACME)
+  # Set explicitly to override, e.g. "0.0.0.0:8080".
+  # listen: "0.0.0.0:80"
 
   # Admin API (local only)
   admin_listen: "127.0.0.1:2019"
@@ -100,8 +112,10 @@ cluster:
   #   - "http://192.0.2.152:80"
   # Master URL (slave only)
   # master_url: "http://192.0.2.151:80"
-  # Timeout for push requests to slaves
-  push_timeout: "5s"
+  # Timeout for push requests to slaves. Large blocklist URL sets (100k+ domains)
+  # are cleaned and gzipped on the slave before it answers, which can take several
+  # seconds on a Pi 3B — keep this comfortably above that.
+  push_timeout: "30s"
   # How often slaves poll the master (fallback if push is lost)
   poll_interval: "30s"
 
@@ -147,9 +161,14 @@ system:
   # Rate Limiting
   rate_limit:
     enabled: true
-    # Requests per minute per IP
+    # Sustained requests per minute per client IP (initial burst = value)
     dns_queries: 1000
     api_requests: 100
+    # CIDRs/bare IPs that bypass DNS rate limiting, e.g. the router that
+    # forwards all household queries from its own IP (empty = no exemptions)
+    exempt_networks: []
+    # - "192.168.1.1"
+    # - "192.0.2.0/24"
 
   # Security
   security:

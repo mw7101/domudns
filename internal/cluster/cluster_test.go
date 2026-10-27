@@ -2,10 +2,13 @@ package cluster_test
 
 import (
 	"bytes"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 
@@ -20,7 +23,7 @@ func newTestStore(t *testing.T) *filestore.FileStore {
 	t.Helper()
 	dir, err := os.MkdirTemp("", "cluster-test-*")
 	require.NoError(t, err)
-	t.Cleanup(func() { os.RemoveAll(dir) })
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	fs, err := filestore.NewFileStore(dir)
 	require.NoError(t, err)
 	return fs
@@ -101,12 +104,34 @@ func TestHMAC_ValidateSuccess(t *testing.T) {
 	assert.True(t, zoneReloaded)
 }
 
-func TestHandler_ServeState(t *testing.T) {
+func TestHandler_ServeStateUnauthenticated(t *testing.T) {
 	fs := newTestStore(t)
-	receiver := cluster.NewReceiverHandler(fs, "", cluster.ReloadCallbacks{})
+	receiver := cluster.NewReceiverHandler(fs, "secret", cluster.ReloadCallbacks{})
 	handler := cluster.NewHandler(receiver, fs)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/internal/state", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+}
+
+func TestHandler_ServeState(t *testing.T) {
+	fs := newTestStore(t)
+	secret := "test-secret"
+	receiver := cluster.NewReceiverHandler(fs, secret, cluster.ReloadCallbacks{})
+	handler := cluster.NewHandler(receiver, fs)
+
+	// Valid HMAC to get 200.
+	ts := time.Now().UnixNano()
+	b := make([]byte, 16)
+	_, _ = rand.Read(b)
+	nonce := hex.EncodeToString(b)
+	sig := cluster.ComputeHMACForTest(secret, cluster.StatePullEvent, ts, nonce, []byte("state"))
+	req := httptest.NewRequest(http.MethodGet, "/api/internal/state", nil)
+	req.Header.Set("X-Sync-Timestamp", strconv.FormatInt(ts, 10))
+	req.Header.Set("X-Sync-Nonce", nonce)
+	req.Header.Set("X-Sync-HMAC", sig)
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 

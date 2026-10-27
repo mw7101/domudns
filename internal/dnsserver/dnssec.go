@@ -34,9 +34,17 @@ func (v *DNSSECValidator) PrepareRequest(req *dns.Msg) *dns.Msg {
 
 	out := req.Copy()
 	out.CheckingDisabled = req.CheckingDisabled
-	// SetEdns0 creates a new OPT record or overwrites the existing one.
-	// UDPSize 4096 matches the configured udp_size default.
-	out.SetEdns0(4096, true)
+	// miekg/dns SetEdns0 always appends a new OPT — it does not replace an
+	// existing one.  Calling it on a copy that already carries the client's
+	// OPT would produce two OPT records, which violates RFC 6891 and causes
+	// upstream resolvers (e.g. Unbound) to return FORMERR.
+	// Correct approach: modify the existing OPT in-place if present.
+	if opt := out.IsEdns0(); opt != nil {
+		opt.SetUDPSize(4096)
+		opt.SetDo()
+	} else {
+		out.SetEdns0(4096, true)
+	}
 	return out
 }
 

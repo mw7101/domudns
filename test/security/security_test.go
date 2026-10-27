@@ -4,6 +4,7 @@ package security
 
 import (
 	"bytes"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -19,7 +20,7 @@ import (
 func TestAuth_RejectsEmptyAPIKey(t *testing.T) {
 	// AuthManager mit leerem API-Key → ValidateAPIKey gibt false zurück → 401
 	authMgr := newTestAuthManager(t, "")
-	handler := api.AuthMiddleware(authMgr, api.NewSessionManager(), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := api.AuthMiddleware(authMgr, api.NewSessionManager(context.Background()), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -33,7 +34,7 @@ func TestAuth_RejectsEmptyAPIKey(t *testing.T) {
 func TestAuth_RejectsWrongAPIKey(t *testing.T) {
 	correctKey := "correct-key-with-sufficient-length-for-validation"
 	authMgr := newTestAuthManager(t, correctKey)
-	handler := api.AuthMiddleware(authMgr, api.NewSessionManager(), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := api.AuthMiddleware(authMgr, api.NewSessionManager(context.Background()), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -47,7 +48,7 @@ func TestAuth_RejectsWrongAPIKey(t *testing.T) {
 func TestAuth_AcceptsStrongAPIKey(t *testing.T) {
 	apiKey := "YOUR_API_KEY_HERE"
 	authMgr := newTestAuthManager(t, apiKey)
-	handler := api.AuthMiddleware(authMgr, api.NewSessionManager(), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := api.AuthMiddleware(authMgr, api.NewSessionManager(context.Background()), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -60,7 +61,7 @@ func TestAuth_AcceptsStrongAPIKey(t *testing.T) {
 // TestAuth_RejectsMissingAuth stellt sicher, dass Anfragen ohne Authorization abgelehnt werden.
 func TestAuth_RejectsMissingAuth(t *testing.T) {
 	authMgr := newTestAuthManager(t, "valid-long-api-key-32-chars-minimum")
-	handler := api.AuthMiddleware(authMgr, api.NewSessionManager(), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := api.AuthMiddleware(authMgr, api.NewSessionManager(context.Background()), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -73,7 +74,7 @@ func TestAuth_RejectsMissingAuth(t *testing.T) {
 func TestAuth_RejectsWrongBearerPrefix(t *testing.T) {
 	apiKey := "valid-long-api-key-32-chars-minimum"
 	authMgr := newTestAuthManager(t, apiKey)
-	handler := api.AuthMiddleware(authMgr, api.NewSessionManager(), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := api.AuthMiddleware(authMgr, api.NewSessionManager(context.Background()), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -87,7 +88,7 @@ func TestAuth_RejectsWrongBearerPrefix(t *testing.T) {
 func TestAuth_ConstantTimeCompare(t *testing.T) {
 	apiKey := "correct-key-with-sufficient-length-for-validation"
 	authMgr := newTestAuthManager(t, apiKey)
-	handler := api.AuthMiddleware(authMgr, api.NewSessionManager(), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := api.AuthMiddleware(authMgr, api.NewSessionManager(context.Background()), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	wrongKeyReq := httptest.NewRequest(http.MethodGet, "/", nil)

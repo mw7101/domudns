@@ -25,6 +25,11 @@ export class ApiError extends Error {
   }
 }
 
+/** Extracts the backend's `error.message` from an already-parsed JSON body, or `fallback` if absent. */
+function errorMessageFrom(data: unknown, fallback: string): string {
+  return (data as { error?: { message?: string } })?.error?.message ?? fallback
+}
+
 const REQUEST_TIMEOUT_MS = 30_000
 
 async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
@@ -48,8 +53,7 @@ async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
       throw new ApiError('Nicht angemeldet', 401)
     }
     if (!res.ok) {
-      const msg = (data as { error?: { message?: string } })?.error?.message ?? res.statusText
-      throw new ApiError(msg, res.status)
+      throw new ApiError(errorMessageFrom(data, res.statusText), res.status)
     }
     return data as T
   } finally {
@@ -136,9 +140,16 @@ export interface CreateRecordResponse {
 export interface BlocklistUrl {
   id: number
   url: string
+  category: string
   enabled: boolean
   last_fetched_at?: string
   last_error?: string
+}
+
+export interface ClientGroup {
+  name: string
+  cidrs: string[]
+  categories: string[]
 }
 
 export interface BlocklistPattern {
@@ -172,6 +183,8 @@ export interface DnsServerConfig {
     key_file?: string
   }
   axfr?: AXFRConfig
+  // Client-network allowlist (CIDRs or bare IPs). Empty = allow all clients.
+  allowed_networks?: string[]
 }
 
 export interface Config {
@@ -187,7 +200,9 @@ export interface Config {
     metrics?: { enabled?: boolean }
     rate_limit?: {
       enabled?: boolean
+      dns_queries?: number
       api_requests?: number
+      exempt_networks?: string[]
     }
   }
   caddy?: Record<string, unknown>
@@ -269,6 +284,15 @@ export const zones = {
       : '/zones/' + encodeURIComponent(domain)
     return request<{ data: Zone }>(url, { method: 'PUT', body: JSON.stringify(zone) })
   },
+
+  /** Clone an existing zone to a new domain/view. */
+  clone: (domain: string, view: string, newDomain: string, newView: string): Promise<{ data: Zone }> => {
+    const params = view ? `?view=${encodeURIComponent(view)}` : ''
+    return request<{ data: Zone }>(`/zones/${encodeURIComponent(domain)}/clone${params}`, {
+      method: 'POST',
+      body: JSON.stringify({ new_domain: newDomain, new_view: newView }),
+    })
+  },
 }
 
 // ─── Records ─────────────────────────────────────────────────────────────────
@@ -296,7 +320,7 @@ export const records = {
 
 export const blocklist = {
   listUrls: () => request<{ data: BlocklistUrl[] }>('/blocklist/urls'),
-  addUrl: (payload: { url: string; enabled: boolean }) =>
+  addUrl: (payload: { url: string; category?: string; enabled: boolean }) =>
     request<{ data: BlocklistUrl }>('/blocklist/urls', {
       method: 'POST',
       body: JSON.stringify(payload),
@@ -381,12 +405,25 @@ export const config = {
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 
 export const auth = {
-  login: (username: string, password: string) =>
-    request<void>('/login', {
+  /**
+   * Logs in with username/password. Deliberately bypasses `request()`: a failed
+   * login (401) is an expected outcome here, not a session expiry, so it must
+   * not trigger the generic redirect-to-/login behavior.
+   */
+  login: async (username: string, password: string): Promise<{ setup_completed?: boolean }> => {
+    const res = await fetch(API_BASE + '/login', {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify({ username, password }),
-      headers: { 'Content-Type': 'application/json' },
-    }),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      // No fallback to res.statusText here: the caller shows its own
+      // user-facing message ("invalid credentials") when the backend omits one.
+      throw new ApiError(errorMessageFrom(data, ''), res.status)
+    }
+    return data as { setup_completed?: boolean }
+  },
   logout: () => fetch('/api/logout', { method: 'POST', headers: authHeaders() }),
   changePassword: (current_password: string, new_password: string) =>
     request<void>('/auth/change-password', {
@@ -505,12 +542,12 @@ export interface TSIGKeyCreateResponse extends TSIGKey {
 export interface DDNSStatus {
   key_count: number
   total_updates: number
-  last_update_at: string      // RFC3339 oder "" wenn noch kein Update
+  last_update_at: string      // RFC3339, or "" if no update yet
   total_failed: number
-  last_error: string          // "" wenn kein Fehler
-  last_error_at: string       // RFC3339 oder "" wenn noch kein Fehler
-  last_rejected_reason: string // z.B. "NOTZONE: example.local" oder ""
-  last_rejected_at: string    // RFC3339 oder ""
+  last_error: string          // "" if no error
+  last_error_at: string       // RFC3339, or "" if no error yet
+  last_rejected_reason: string // e.g. "NOTZONE: example.local", or ""
+  last_rejected_at: string    // RFC3339, or ""
 }
 
 export const ddns = {
@@ -537,17 +574,9 @@ export const ddns = {
 
 // ─── Cluster ─────────────────────────────────────────────────────────────────
 
-export interface ClusterNode {
-  label: string
-  url: string
-  ip: string
-  role: string
-}
-
-export interface ClusterInfo {
-  role: string
-  remote_nodes: ClusterNode[]
-}
+// ClusterNode is an alias for ClusterNodeInfo (defined in the TLS/Cluster section below).
+// It is kept here for backwards compatibility with existing imports.
+export type ClusterNode = ClusterNodeInfo
 
 export const cluster = {
   info: () => request<{ data?: ClusterInfo }>('/cluster'),
@@ -587,7 +616,6 @@ export const dhcpLeaseSync = {
   getStatus: () => request<{ data: DHCPSyncStatus }>('/dhcp/status'),
 }
 
-/** Checks the reachability of a remote node by its full URL (e.g. http://192.0.2.152:80). */
 // ─── Named API Keys ───────────────────────────────────────────────────────────
 
 export interface NamedAPIKey {
@@ -621,12 +649,30 @@ export async function createNamedAPIKey(
 }
 
 export async function deleteNamedAPIKey(id: string): Promise<void> {
-  await fetch(API_BASE + `/auth/api-keys/${id}`, {
+  const res = await fetch(API_BASE + `/auth/api-keys/${id}`, {
     method: 'DELETE',
     headers: authHeaders(),
   })
+  if (res.status === 401) throw new ApiError('Nicht angemeldet', 401)
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new ApiError(errorMessageFrom(data, res.statusText), res.status)
+  }
 }
 
+// ─── Client Groups ────────────────────────────────────────────────────────────
+
+export const clientGroups = {
+  get: (): Promise<{ data: ClientGroup[] }> =>
+    request<{ data: ClientGroup[] }>('/client-groups'),
+  set: (groups: ClientGroup[]): Promise<{ data: ClientGroup[] }> =>
+    request<{ data: ClientGroup[] }>('/client-groups', {
+      method: 'PUT',
+      body: JSON.stringify(groups),
+    }),
+}
+
+/** Checks the reachability of a remote node by its full URL (e.g. http://192.0.2.152:80). */
 export async function checkNodeHealth(nodeUrl: string): Promise<{ online: boolean; status: string }> {
   try {
     const ctrl = new AbortController()
@@ -644,4 +690,65 @@ export async function checkNodeHealth(nodeUrl: string): Promise<{ online: boolea
   } catch {
     return { online: false, status: 'offline' }
   }
+}
+
+// ─── TLS / Let's Encrypt (ACME DNS-01) ───────────────────────────────────────
+
+export interface TLSACMEConfig {
+  enabled: boolean
+  domain: string
+  email: string
+  staging: boolean
+}
+
+/** Fields are absent from the JSON when no certificate/renewal exists yet (omitempty in the backend). */
+export interface TLSACMEStatus {
+  domain?: string
+  valid_until?: string   // ISO 8601
+  last_renewed?: string  // ISO 8601
+  error?: string
+}
+
+export interface ClusterNodeInfo {
+  label: string
+  url: string
+  ip: string
+  role: string
+}
+
+export interface ClusterInfo {
+  role: string           // "master" | "slave"
+  remote_nodes: ClusterNodeInfo[]
+}
+
+export async function getTLSACMEConfig(): Promise<TLSACMEConfig> {
+  const res = await request<{ success: boolean; data: TLSACMEConfig }>('/tls/acme')
+  return res.data
+}
+
+export async function setTLSACMEConfig(cfg: TLSACMEConfig): Promise<TLSACMEConfig> {
+  const res = await request<{ success: boolean; data: TLSACMEConfig }>('/tls/acme', {
+    method: 'PUT',
+    body: JSON.stringify(cfg),
+  })
+  return res.data
+}
+
+export async function getTLSACMEStatus(): Promise<TLSACMEStatus> {
+  const res = await request<{ success: boolean; data: TLSACMEStatus }>('/tls/acme/status')
+  return res.data
+}
+
+export async function triggerTLSRenewal(): Promise<void> {
+  const res = await fetch(API_BASE + '/tls/acme/renew', {
+    method: 'POST',
+    headers: authHeaders(),
+  })
+  if (res.status === 401) throw new ApiError('Nicht angemeldet', 401)
+  if (!res.ok) throw new ApiError(res.statusText, res.status)
+}
+
+export async function getClusterInfo(): Promise<ClusterInfo> {
+  const res = await request<{ success: boolean; data: ClusterInfo }>('/cluster')
+  return res.data
 }

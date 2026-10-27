@@ -45,6 +45,10 @@ func NewAuthManager(ctx context.Context, s store.AuthStore) (*AuthManager, error
 		if err := s.UpdateAuthConfig(ctx, am.cfg); err != nil {
 			log.Warn().Err(err).Msg("could not save default credentials to store")
 		}
+		log.Warn().Msg("SECURITY: default credentials admin/admin are active — complete setup wizard or change password immediately")
+	}
+	if !am.cfg.SetupCompleted {
+		log.Warn().Msg("SECURITY: setup wizard not completed — default credentials may still be active")
 	}
 	return am, nil
 }

@@ -230,7 +230,10 @@ func TestGenerateResponse_CNAME_AQuery_InZone(t *testing.T) {
 }
 
 // TestGenerateResponse_CNAME_AQuery_ExternalTarget verifies that a CNAME pointing
-// outside the zone returns only the CNAME (resolver must follow the chain).
+// outside the zone returns the CNAME plus the canonical name left for the pipeline
+// (zoneResponse.cnameTarget). The target's records are appended by
+// pipeline_cname.go, not by GenerateResponse, because resolving them may need the
+// other zones' views or the upstream forwarder.
 func TestGenerateResponse_CNAME_AQuery_ExternalTarget(t *testing.T) {
 	zm := NewZoneManager()
 	zone := &dnsinternal.Zone{
@@ -244,13 +247,123 @@ func TestGenerateResponse_CNAME_AQuery_ExternalTarget(t *testing.T) {
 
 	req := new(mdns.Msg)
 	req.SetQuestion("alias.example.com.", mdns.TypeA)
-	resp := zm.GenerateResponse(req, zone, "alias").msg
+	zr := zm.GenerateResponse(req, zone, "alias")
 
-	if len(resp.Answer) != 1 {
-		t.Fatalf("answer count = %d, want 1 (CNAME only)", len(resp.Answer))
+	if len(zr.msg.Answer) != 1 {
+		t.Fatalf("answer count = %d, want 1 (CNAME only)", len(zr.msg.Answer))
 	}
-	if _, ok := resp.Answer[0].(*mdns.CNAME); !ok {
-		t.Fatalf("answer[0] type = %T, want *mdns.CNAME", resp.Answer[0])
+	if _, ok := zr.msg.Answer[0].(*mdns.CNAME); !ok {
+		t.Fatalf("answer[0] type = %T, want *mdns.CNAME", zr.msg.Answer[0])
+	}
+	if zr.cnameTarget != "target.other.com" {
+		t.Errorf("cnameTarget = %q, want \"target.other.com\"", zr.cnameTarget)
+	}
+}
+
+// TestGenerateResponse_CNAME_AQuery_CrossZoneTarget covers the case that broke
+// musl/glibc stub resolvers in production: a CNAME in one zone whose canonical
+// name lives in another local zone. GenerateResponse reports the canonical name;
+// resolving it is pipeline_cname.go's job (view-aware, may need the forwarder).
+func TestGenerateResponse_CNAME_AQuery_CrossZoneTarget(t *testing.T) {
+	zm := NewZoneManager()
+	intZone := &dnsinternal.Zone{
+		Domain: "int.example.com",
+		TTL:    300,
+		Records: []dnsinternal.Record{
+			{ID: 1, Name: "s3-ext", Type: dnsinternal.TypeCNAME, TTL: 300, Value: "minio.cln.int.example.com"},
+		},
+	}
+	clnZone := &dnsinternal.Zone{
+		Domain: "cln.int.example.com",
+		TTL:    300,
+		Records: []dnsinternal.Record{
+			{ID: 1, Name: "minio", Type: dnsinternal.TypeA, TTL: 300, Value: "192.168.101.5"},
+		},
+	}
+	loadZonesManually(zm, intZone, clnZone)
+
+	req := new(mdns.Msg)
+	req.SetQuestion("s3-ext.int.example.com.", mdns.TypeA)
+	zr := zm.GenerateResponse(req, intZone, "s3-ext")
+
+	if len(zr.msg.Answer) != 1 {
+		t.Fatalf("answer count = %d, want 1 (only the CNAME comes from GenerateResponse)", len(zr.msg.Answer))
+	}
+	if zr.cnameTarget != "minio.cln.int.example.com" {
+		t.Errorf("cnameTarget = %q, want \"minio.cln.int.example.com\"", zr.cnameTarget)
+	}
+}
+
+// TestGenerateResponse_CNAME_InZoneChain verifies a multi-hop chain inside one
+// zone: every intermediate CNAME plus the final A record (RFC 1034 §4.3.2 step 3a
+// — repeat the lookup with the canonical name).
+func TestGenerateResponse_CNAME_InZoneChain(t *testing.T) {
+	zm := NewZoneManager()
+	zone := &dnsinternal.Zone{
+		Domain: "example.com",
+		TTL:    300,
+		Records: []dnsinternal.Record{
+			{ID: 1, Name: "a", Type: dnsinternal.TypeCNAME, TTL: 300, Value: "b.example.com"},
+			{ID: 2, Name: "b", Type: dnsinternal.TypeCNAME, TTL: 300, Value: "c.example.com"},
+			{ID: 3, Name: "c", Type: dnsinternal.TypeA, TTL: 300, Value: "10.0.0.7"},
+		},
+	}
+	loadZonesManually(zm, zone)
+
+	req := new(mdns.Msg)
+	req.SetQuestion("a.example.com.", mdns.TypeA)
+	zr := zm.GenerateResponse(req, zone, "a")
+
+	if zr.cnameTarget != "" {
+		t.Errorf("cnameTarget = %q, want \"\" (chain answered in-zone)", zr.cnameTarget)
+	}
+	if len(zr.msg.Answer) != 3 {
+		t.Fatalf("answer count = %d, want 3 (CNAME, CNAME, A)", len(zr.msg.Answer))
+	}
+	a, ok := zr.msg.Answer[2].(*mdns.A)
+	if !ok {
+		t.Fatalf("answer[2] type = %T, want *mdns.A", zr.msg.Answer[2])
+	}
+	if a.A.String() != "10.0.0.7" {
+		t.Errorf("A record = %s, want 10.0.0.7", a.A)
+	}
+}
+
+// TestGenerateResponse_CNAME_InZoneLoop verifies that a self-referencing chain
+// terminates as soon as a name repeats: no A record, and — because the loop is
+// detected per name rather than by hitting the depth limit — no duplicate RRs
+// (RFC 1035 §3.6.2).
+func TestGenerateResponse_CNAME_InZoneLoop(t *testing.T) {
+	zm := NewZoneManager()
+	zone := &dnsinternal.Zone{
+		Domain: "example.com",
+		TTL:    300,
+		Records: []dnsinternal.Record{
+			{ID: 1, Name: "a", Type: dnsinternal.TypeCNAME, TTL: 300, Value: "b.example.com"},
+			{ID: 2, Name: "b", Type: dnsinternal.TypeCNAME, TTL: 300, Value: "a.example.com"},
+		},
+	}
+	loadZonesManually(zm, zone)
+
+	req := new(mdns.Msg)
+	req.SetQuestion("a.example.com.", mdns.TypeA)
+	zr := zm.GenerateResponse(req, zone, "a")
+
+	if zr.cnameTarget == "" {
+		t.Error("cnameTarget empty, want the still unresolved canonical name")
+	}
+	seen := map[string]bool{}
+	for _, rr := range zr.msg.Answer {
+		if _, ok := rr.(*mdns.A); ok {
+			t.Fatal("a CNAME loop must not produce an A record")
+		}
+		if seen[rr.String()] {
+			t.Fatalf("duplicate RR in a CNAME loop answer: %s", rr.String())
+		}
+		seen[rr.String()] = true
+	}
+	if len(zr.msg.Answer) != 2 {
+		t.Errorf("answer count = %d, want 2 (a→b, b→a, then the loop is cut)", len(zr.msg.Answer))
 	}
 }
 
@@ -338,7 +451,7 @@ func TestGenerateResponse_ALIAS_ARecord_Wins_Over_ALIAS(t *testing.T) {
 		Domain: "example.com",
 		TTL:    300,
 		Records: []dnsinternal.Record{
-			{ID: 1, Name: "@", Type: dnsinternal.TypeA,     TTL: 300, Value: "1.2.3.4"},
+			{ID: 1, Name: "@", Type: dnsinternal.TypeA, TTL: 300, Value: "1.2.3.4"},
 			{ID: 2, Name: "@", Type: dnsinternal.TypeALIAS, TTL: 300, Value: "cdn.example.com"},
 		},
 	}
@@ -374,6 +487,44 @@ func TestGenerateResponse_ALIAS_AAAA_Query_Sets_AliasTarget(t *testing.T) {
 	zr := zm.GenerateResponse(req, zone, "@")
 	if zr.aliasTarget != "cdn.example.com" {
 		t.Errorf("AAAA query: expected aliasTarget, got %q", zr.aliasTarget)
+	}
+}
+
+// TestGenerateResponse_MultiLabelRelativeName verifies that a record whose
+// name is a multi-label zone-relative name is answered for that FQDN — the
+// ACME DNS-01 case for hosts below the zone apex (record
+// "_acme-challenge.pve-node" in zone example.com answers
+// "_acme-challenge.pve-node.example.com").
+func TestGenerateResponse_MultiLabelRelativeName(t *testing.T) {
+	zm := NewZoneManager()
+	zone := &dnsinternal.Zone{
+		Domain: "example.com",
+		TTL:    300,
+		Records: []dnsinternal.Record{
+			{ID: 1, Name: "_acme-challenge.pve-node", Type: dnsinternal.TypeTXT, TTL: 300, Value: "acme-token"},
+		},
+	}
+	loadZonesManually(zm, zone)
+
+	req := new(mdns.Msg)
+	req.SetQuestion("_acme-challenge.pve-node.example.com.", mdns.TypeTXT)
+	resp := zm.GenerateResponse(req, zone, "_acme-challenge.pve-node").msg
+
+	if resp.Rcode != mdns.RcodeSuccess {
+		t.Fatalf("expected NOERROR, got rcode %d", resp.Rcode)
+	}
+	if len(resp.Answer) != 1 {
+		t.Fatalf("answer count = %d, want 1", len(resp.Answer))
+	}
+	txt, ok := resp.Answer[0].(*mdns.TXT)
+	if !ok {
+		t.Fatalf("answer[0] type = %T, want *mdns.TXT", resp.Answer[0])
+	}
+	if txt.Hdr.Name != "_acme-challenge.pve-node.example.com." {
+		t.Errorf("answer name = %q, want \"_acme-challenge.pve-node.example.com.\"", txt.Hdr.Name)
+	}
+	if len(txt.Txt) != 1 || txt.Txt[0] != "acme-token" {
+		t.Errorf("TXT = %v, want [acme-token]", txt.Txt)
 	}
 }
 
@@ -456,5 +607,133 @@ func TestAliasPhase_InZoneResolution(t *testing.T) {
 	}
 	if w.written == nil {
 		t.Error("aliasPhase must write response via ctx.w.WriteMsg")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// RFC 1034 §4.3.3 — Wildcard record matching
+// ---------------------------------------------------------------------------
+
+// makeWildcardZone builds a zone with a wildcard A record and an optional
+// exact A record for the given host label.
+func makeWildcardZone(domain string, wildcardIP string, exactHost, exactIP string) *dnsinternal.Zone {
+	z := &dnsinternal.Zone{
+		Domain: domain,
+		TTL:    300,
+		Records: []dnsinternal.Record{
+			{ID: 1, Name: "@", Type: dnsinternal.TypeA, TTL: 300, Value: "10.0.0.1"},
+			{ID: 2, Name: "*", Type: dnsinternal.TypeA, TTL: 300, Value: wildcardIP},
+		},
+	}
+	if exactHost != "" && exactIP != "" {
+		z.Records = append(z.Records, dnsinternal.Record{
+			ID: 3, Name: exactHost, Type: dnsinternal.TypeA, TTL: 300, Value: exactIP,
+		})
+	}
+	return z
+}
+
+// TestWildcard_SingleLabelMatch verifies that a "*" record matches a
+// single-label subdomain and produces the correct FQDN in the answer.
+func TestWildcard_SingleLabelMatch(t *testing.T) {
+	zm := NewZoneManager()
+	zone := makeWildcardZone("test.servwerk.de", "1.2.3.4", "", "")
+	loadZonesManually(zm, zone)
+
+	req := new(mdns.Msg)
+	req.SetQuestion("test01.test.servwerk.de.", mdns.TypeA)
+
+	resp := zm.GenerateResponse(req, zone, "test01").msg
+	if resp.Rcode != mdns.RcodeSuccess {
+		t.Fatalf("expected NOERROR, got rcode %d", resp.Rcode)
+	}
+	if len(resp.Answer) == 0 {
+		t.Fatal("expected at least one answer RR")
+	}
+	a, ok := resp.Answer[0].(*mdns.A)
+	if !ok {
+		t.Fatalf("expected A record, got %T", resp.Answer[0])
+	}
+	if a.A.String() != "1.2.3.4" {
+		t.Errorf("expected IP 1.2.3.4, got %s", a.A.String())
+	}
+	if a.Hdr.Name != "test01.test.servwerk.de." {
+		t.Errorf("expected FQDN test01.test.servwerk.de., got %q", a.Hdr.Name)
+	}
+}
+
+// TestWildcard_MultiLabelNoMatch verifies that a "*" record does NOT match a
+// multi-label subdomain (RFC 1034 §4.3.3: only single-label wildcards).
+func TestWildcard_MultiLabelNoMatch(t *testing.T) {
+	zm := NewZoneManager()
+	zone := makeWildcardZone("test.servwerk.de", "1.2.3.4", "", "")
+	loadZonesManually(zm, zone)
+
+	req := new(mdns.Msg)
+	req.SetQuestion("foo.bar.test.servwerk.de.", mdns.TypeA)
+
+	// subdomain "foo.bar" contains a dot — wildcard must not match.
+	resp := zm.GenerateResponse(req, zone, "foo.bar").msg
+	if resp.Rcode != mdns.RcodeNameError {
+		t.Errorf("expected NXDOMAIN (rcode 3), got rcode %d", resp.Rcode)
+	}
+}
+
+// TestWildcard_ApexNoMatch verifies that a "*" record does NOT match the zone
+// apex itself (subdomain == "@").
+func TestWildcard_ApexNoMatch(t *testing.T) {
+	zm := NewZoneManager()
+	zone := makeWildcardZone("test.servwerk.de", "1.2.3.4", "", "")
+	loadZonesManually(zm, zone)
+
+	req := new(mdns.Msg)
+	req.SetQuestion("test.servwerk.de.", mdns.TypeA)
+
+	// Apex has an explicit "@" A record (10.0.0.1) — must NOT return 1.2.3.4.
+	resp := zm.GenerateResponse(req, zone, "@").msg
+	if resp.Rcode != mdns.RcodeSuccess {
+		t.Fatalf("expected NOERROR for apex, got rcode %d", resp.Rcode)
+	}
+	if len(resp.Answer) == 0 {
+		t.Fatal("expected apex A record in answer")
+	}
+	a, ok := resp.Answer[0].(*mdns.A)
+	if !ok {
+		t.Fatalf("expected A record, got %T", resp.Answer[0])
+	}
+	if a.A.String() == "1.2.3.4" {
+		t.Error("wildcard IP must not appear for apex query")
+	}
+}
+
+// TestWildcard_ExactRecordTakesPrecedence verifies that an exact match wins
+// over the wildcard when both are present in the zone.
+func TestWildcard_ExactRecordTakesPrecedence(t *testing.T) {
+	zm := NewZoneManager()
+	zone := makeWildcardZone("test.servwerk.de", "1.2.3.4", "host", "5.6.7.8")
+	loadZonesManually(zm, zone)
+
+	req := new(mdns.Msg)
+	req.SetQuestion("host.test.servwerk.de.", mdns.TypeA)
+
+	resp := zm.GenerateResponse(req, zone, "host").msg
+	if resp.Rcode != mdns.RcodeSuccess {
+		t.Fatalf("expected NOERROR, got rcode %d", resp.Rcode)
+	}
+	if len(resp.Answer) == 0 {
+		t.Fatal("expected at least one answer RR")
+	}
+	// Must contain exactly the exact record IP, not the wildcard IP.
+	for _, rr := range resp.Answer {
+		a, ok := rr.(*mdns.A)
+		if !ok {
+			continue
+		}
+		if a.A.String() == "1.2.3.4" {
+			t.Error("wildcard IP 1.2.3.4 must not appear when exact record exists")
+		}
+		if a.A.String() != "5.6.7.8" {
+			t.Errorf("expected exact IP 5.6.7.8, got %s", a.A.String())
+		}
 	}
 }

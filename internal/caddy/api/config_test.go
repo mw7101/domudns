@@ -70,7 +70,7 @@ func TestConfigHandler_GET(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+testConfigAPIKey)
 	w := httptest.NewRecorder()
 
-	handler := AuthMiddleware(authMgr, NewSessionManager(), h)
+	handler := AuthMiddleware(authMgr, NewSessionManager(context.Background()), h)
 	handler.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
@@ -122,7 +122,7 @@ func TestConfigHandler_PATCH(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
-	handler := AuthMiddleware(authMgr, NewSessionManager(), h)
+	handler := AuthMiddleware(authMgr, NewSessionManager(context.Background()), h)
 	handler.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
@@ -140,7 +140,7 @@ func TestConfigHandler_PATCH_no_store(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+testConfigAPIKey)
 	w := httptest.NewRecorder()
 
-	handler := AuthMiddleware(authMgr, NewSessionManager(), h)
+	handler := AuthMiddleware(authMgr, NewSessionManager(context.Background()), h)
 	handler.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusServiceUnavailable, w.Code)

@@ -1,13 +1,13 @@
 'use client'
 
-import { useEffect, useState, useCallback, Suspense } from 'react'
+import { useEffect, useState, useCallback, useMemo, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Topbar } from '@/components/layout/Topbar'
 import { AnimatedModal } from '@/components/ui/animated-modal'
 import { MovingBorderButton } from '@/components/ui/moving-border'
 import { useToast } from '@/components/shared/Toast'
-import { zones as zonesApi, records as recordsApi, type Zone, type DnsRecord, type ImportResult, type SOA, type CreateRecordResponse } from '@/lib/api'
-import { formatRecordValue, RECORD_TYPE_COLORS } from '@/lib/utils'
+import { zones as zonesApi, records as recordsApi, ApiError, type Zone, type DnsRecord, type ImportResult, type SOA, type CreateRecordResponse } from '@/lib/api'
+import { formatRecordValue, RECORD_TYPE_COLORS, getErrorMessage } from '@/lib/utils'
 import { useZones } from '@/lib/hooks/useZones'
 
 const RECORD_TYPES = ['A', 'AAAA', 'ALIAS', 'CNAME', 'MX', 'TXT', 'NS', 'SRV', 'PTR', 'CAA', 'FWD']
@@ -51,6 +51,8 @@ function ZonesContent() {
   const [savingRecord, setSavingRecord] = useState(false)
   const [deletingRecord, setDeletingRecord] = useState<number | null>(null)
   const [exportingZone, setExportingZone] = useState(false)
+  // Record search
+  const [recordSearch, setRecordSearch] = useState('')
   const [importing, setImporting] = useState(false)
   const [savingSOA, setSavingSOA] = useState(false)
 
@@ -70,6 +72,13 @@ function ZonesContent() {
   const [zoneView, setZoneView] = useState('')
   const [zoneTtl, setZoneTtl] = useState(3600)
   const [zoneTtlOverride, setZoneTtlOverride] = useState(0)
+
+  // Clone Modal
+  const [cloneModal, setCloneModal] = useState<{ domain: string; view: string } | null>(null)
+  const [cloneNewDomain, setCloneNewDomain] = useState('')
+  const [cloneNewView, setCloneNewView] = useState('')
+  const [cloneLoading, setCloneLoading] = useState(false)
+  const [cloneError, setCloneError] = useState<string | null>(null)
 
   // SOA Modal
   const [soaModalOpen, setSOAModalOpen] = useState(false)
@@ -120,6 +129,21 @@ function ZonesContent() {
     else setSelectedZone(null)
   }, [domainParam, loadZoneDetail])
 
+  useEffect(() => {
+    setRecordSearch('')
+  }, [selectedZone?.domain, selectedZone?.view])
+
+  const filteredRecords = useMemo(() => {
+    const q = recordSearch.trim().toLowerCase()
+    if (!q) return selectedZone?.records ?? []
+    return (selectedZone?.records ?? []).filter(
+      (r) =>
+        (r.name ?? '@').toLowerCase().includes(q) ||
+        r.type.toLowerCase().includes(q) ||
+        formatRecordValue(r).toLowerCase().includes(q)
+    )
+  }, [selectedZone?.records, recordSearch])
+
   // FWD record must always use @ as name
   useEffect(() => {
     if (rForm.type === 'FWD') {
@@ -141,7 +165,7 @@ function ZonesContent() {
       router.push('/dashboard/zones/')
       await loadZones()
     } catch (err: unknown) {
-      showToast(err instanceof Error ? err.message : 'Fehler', 'error')
+      showToast(getErrorMessage(err, 'Fehler'), 'error')
     } finally {
       setDeletingZone(null)
     }
@@ -166,7 +190,7 @@ function ZonesContent() {
       setZoneTtlOverride(0)
       await loadZones()
     } catch (err: unknown) {
-      showToast(err instanceof Error ? err.message : 'Fehler', 'error')
+      showToast(getErrorMessage(err, 'Fehler'), 'error')
     } finally {
       setAddingZone(false)
     }
@@ -228,7 +252,7 @@ function ZonesContent() {
       setRecordModalOpen(false)
       await loadZoneDetail(recordDomain, selectedZone?.view)
     } catch (err: unknown) {
-      showToast(err instanceof Error ? err.message : 'Fehler', 'error')
+      showToast(getErrorMessage(err, 'Fehler'), 'error')
     } finally {
       setSavingRecord(false)
     }
@@ -243,7 +267,7 @@ function ZonesContent() {
       showToast('Record gelöscht')
       await loadZoneDetail(domain, selectedZone?.view)
     } catch (err: unknown) {
-      showToast(err instanceof Error ? err.message : 'Fehler', 'error')
+      showToast(getErrorMessage(err, 'Fehler'), 'error')
     } finally {
       setDeletingRecord(null)
     }
@@ -268,7 +292,7 @@ function ZonesContent() {
       setSOAModalOpen(false)
       await loadZoneDetail(selectedZone.domain, selectedZone.view)
     } catch (err: unknown) {
-      showToast(err instanceof Error ? err.message : 'Fehler beim Speichern', 'error')
+      showToast(getErrorMessage(err, 'Fehler beim Speichern'), 'error')
     } finally {
       setSavingSOA(false)
     }
@@ -287,9 +311,35 @@ function ZonesContent() {
       a.click()
       URL.revokeObjectURL(url)
     } catch (err: unknown) {
-      showToast(err instanceof Error ? err.message : 'Export fehlgeschlagen', 'error')
+      showToast(getErrorMessage(err, 'Export fehlgeschlagen'), 'error')
     } finally {
       setExportingZone(false)
+    }
+  }
+
+  const handleClone = async () => {
+    if (!cloneModal) return
+    setCloneLoading(true)
+    setCloneError(null)
+    try {
+      const res = await zonesApi.clone(cloneModal.domain, cloneModal.view, cloneNewDomain, cloneNewView)
+      const newZone = res.data
+      setCloneModal(null)
+      showToast('Zone geklont', 'success')
+      await loadZones()
+      const params = new URLSearchParams({ d: newZone.domain })
+      if (newZone.view) params.set('view', newZone.view)
+      router.push(`/dashboard/zones/?${params.toString()}`)
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 409) {
+        setCloneError('Zone existiert bereits')
+      } else if (e instanceof ApiError && e.status === 400) {
+        setCloneError(e.message)
+      } else {
+        setCloneError(e instanceof Error ? e.message : 'Fehler beim Klonen')
+      }
+    } finally {
+      setCloneLoading(false)
     }
   }
 
@@ -314,7 +364,7 @@ function ZonesContent() {
       setImportView('')
       await loadZones()
     } catch (err: unknown) {
-      showToast(err instanceof Error ? err.message : 'Import fehlgeschlagen', 'error')
+      showToast(getErrorMessage(err, 'Import fehlgeschlagen'), 'error')
     } finally {
       setImporting(false)
     }
@@ -336,11 +386,77 @@ function ZonesContent() {
       setAxfrView('')
       await loadZones()
     } catch (err: unknown) {
-      showToast(err instanceof Error ? err.message : 'AXFR-Import fehlgeschlagen', 'error')
+      showToast(getErrorMessage(err, 'AXFR-Import fehlgeschlagen'), 'error')
     } finally {
       setImporting(false)
     }
   }
+
+  const cloneModalEl = cloneModal && (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+      <div className="bg-[var(--surface-2)] border border-[var(--border)] rounded-2xl p-6 w-full max-w-md">
+        <h2 className="text-lg font-semibold text-[var(--text)] mb-4">Zone klonen</h2>
+
+        <p className="text-sm text-[var(--muted)] mb-4">
+          Quelle: <span className="text-[var(--text)] font-mono">{cloneModal.domain}</span>
+          {cloneModal.view && (
+            <span className="text-[var(--muted-2)] ml-1">(View: {cloneModal.view})</span>
+          )}
+        </p>
+
+        <div className="space-y-3">
+          <div>
+            <label className="block text-xs font-semibold text-[var(--muted-2)] uppercase tracking-wider mb-2">
+              Neuer Domain-Name
+            </label>
+            <input
+              type="text"
+              value={cloneNewDomain}
+              onChange={(e) => setCloneNewDomain(e.target.value)}
+              placeholder={cloneModal.domain}
+              autoFocus
+              className="w-full px-3 py-2 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] text-sm focus:outline-none focus:border-amber-500 transition-colors"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-[var(--muted-2)] uppercase tracking-wider mb-2">
+              Neuer View <span className="text-[var(--muted-2)] normal-case font-normal">(optional)</span>
+            </label>
+            <input
+              type="text"
+              value={cloneNewView}
+              onChange={(e) => setCloneNewView(e.target.value)}
+              placeholder="Standard (leer lassen)"
+              className="w-full px-3 py-2 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] text-sm focus:outline-none focus:border-amber-500 transition-colors"
+            />
+          </div>
+        </div>
+
+        {cloneError && (
+          <p className="mt-3 text-sm text-red-400">{cloneError}</p>
+        )}
+
+        <div className="flex gap-3 pt-4 mt-2">
+          <button
+            onClick={() => { setCloneModal(null); setCloneError(null) }}
+            className="flex-1 px-4 py-2 rounded-xl border border-[var(--border)] text-[var(--muted-2)] text-sm hover:text-[var(--text)] hover:border-[var(--muted)] disabled:opacity-50 transition-colors"
+            disabled={cloneLoading}
+          >
+            Abbrechen
+          </button>
+          <MovingBorderButton
+            onClick={handleClone}
+            disabled={cloneLoading || !cloneNewDomain}
+            className="flex-1"
+          >
+            {cloneLoading
+              ? <span className="flex items-center justify-center gap-2"><span className="inline-block w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" /> Klone …</span>
+              : 'Klonen'}
+          </MovingBorderButton>
+        </div>
+      </div>
+    </div>
+  )
 
   if (loading) {
     return (
@@ -356,6 +472,7 @@ function ZonesContent() {
     for (const r of selectedZone.records ?? []) {
       typeStats[r.type] = (typeStats[r.type] ?? 0) + 1
     }
+    const showSOA = !recordSearch.trim() || filteredRecords.length === 0
 
     return (
       <>
@@ -387,14 +504,56 @@ function ZonesContent() {
               >
                 {exportingZone ? '…' : '↓ Export .zone'}
               </button>
+              <button
+                onClick={() => {
+                  setCloneNewDomain('')
+                  setCloneNewView('')
+                  setCloneError(null)
+                  setCloneModal({ domain: selectedZone.domain, view: selectedZone.view ?? '' })
+                }}
+                className="text-xs text-[var(--muted-2)] hover:text-[var(--text)] px-3 py-1.5 rounded-lg border border-[var(--border)] hover:border-[var(--muted)] transition-colors"
+              >
+                Klonen
+              </button>
               <MovingBorderButton onClick={() => openRecordModal(selectedZone.domain)}>
                 + Record
               </MovingBorderButton>
             </div>
           </div>
 
+          {/* Record Search */}
+          <div className="flex items-center gap-3">
+            <div className="relative flex-1">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 20 20"
+                fill="currentColor"
+                className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--muted-2)] pointer-events-none"
+              >
+                <path
+                  fillRule="evenodd"
+                  d="M9 3.5a5.5 5.5 0 100 11 5.5 5.5 0 000-11zM2 9a7 7 0 1112.452 4.391l3.328 3.329a.75.75 0 11-1.06 1.06l-3.329-3.328A7 7 0 012 9z"
+                  clipRule="evenodd"
+                />
+              </svg>
+              <input
+                type="text"
+                placeholder="Search records (name, type, value)…"
+                aria-label="Records suchen"
+                value={recordSearch}
+                onChange={(e) => setRecordSearch(e.target.value)}
+                className="w-full pl-9 pr-4 py-2 text-sm bg-[var(--surface-3)] border border-[var(--border)] rounded-xl text-[var(--text)] placeholder-[var(--muted-2)] focus:outline-none focus:border-[var(--muted)] transition-colors"
+              />
+            </div>
+            {recordSearch && (
+              <span className="text-xs text-[var(--muted-2)] whitespace-nowrap">
+                {filteredRecords.length} von {(selectedZone?.records ?? []).length} Records
+              </span>
+            )}
+          </div>
+
           <div className="bg-[var(--surface-2)] neon-card rounded-2xl overflow-hidden">
-            {(selectedZone.records ?? []).length > 0 || selectedZone.soa ? (
+            {filteredRecords.length > 0 || (showSOA && !!selectedZone.soa) ? (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
@@ -407,7 +566,7 @@ function ZonesContent() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[var(--surface)]">
-                    {selectedZone.soa && (
+                    {showSOA && selectedZone.soa && (
                       <tr className="bg-amber-500/5 hover:bg-amber-500/10 transition-colors">
                         <td className="px-4 py-3 font-mono text-xs text-[var(--text)]">@</td>
                         <td className="px-4 py-3">
@@ -430,7 +589,7 @@ function ZonesContent() {
                         </td>
                       </tr>
                     )}
-                    {(selectedZone.records ?? []).map((r) => {
+                    {filteredRecords.map((r) => {
                       const isDeletingThis = deletingRecord === r.id
                       return (
                       <tr key={r.id} className="hover:bg-[var(--surface-3)] transition-colors">
@@ -732,6 +891,8 @@ function ZonesContent() {
             </div>
           </div>
         </AnimatedModal>
+
+        {cloneModalEl}
       </>
     )
   }
@@ -807,6 +968,22 @@ function ZonesContent() {
                       className="text-xs text-[var(--muted-2)] hover:text-[var(--text)] disabled:opacity-50 px-2 py-1 rounded border border-[var(--border)] hover:border-[var(--muted)] transition-colors"
                     >
                       Records
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setCloneNewDomain('')
+                        setCloneNewView('')
+                        setCloneError(null)
+                        setCloneModal({ domain: z.domain, view: z.view ?? '' })
+                      }}
+                      className="p-1 text-neutral-400 hover:text-blue-400 transition-colors"
+                      title="Zone klonen"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                          d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                      </svg>
                     </button>
                     <button
                       onClick={() => handleDeleteZone(z.domain)}
@@ -1045,6 +1222,8 @@ function ZonesContent() {
           </div>
         </AnimatedModal>
       </div>
+
+      {cloneModalEl}
     </>
   )
 }

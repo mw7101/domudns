@@ -122,12 +122,12 @@ func (h *ConfigHandler) servePatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.configStore.UpdateOverrides(r.Context(), overrides); err != nil {
-		writeError(w, http.StatusInternalServerError, "UPDATE_FAILED", err.Error())
+		writeInternalError(w, "UPDATE_FAILED", err)
 		return
 	}
 	// Merge into in-memory config so GET reflects new values immediately
 	if err := config.MergeOverrides(h.cfg, overrides); err != nil {
-		writeError(w, http.StatusInternalServerError, "MERGE_FAILED", err.Error())
+		writeInternalError(w, "MERGE_FAILED", err)
 		return
 	}
 	// Live-reload: apply settings immediately (without restart)

@@ -85,6 +85,7 @@ DomU DNS consists of the following main components:
   config_overrides.json           # Web UI config overrides (upstream, log_level, etc.)
   acme_challenges.json            # ACME TXT records (temporary, Let's Encrypt)
   tsig_keys.json                  # TSIG keys for RFC 2136 DDNS (secrets in plaintext!)
+  client_groups.json              # Client-Gruppen-Policies (IP ranges → blocklist categories)
 ```
 
 ### Atomic Writes
@@ -102,7 +103,8 @@ All write operations use `temp-file + os.Rename()` (guaranteed atomic on Linux):
 |---------|----------|
 | `internal/filestore/store.go` | `FileStore` struct, `NewFileStore()`, `HealthCheck()` |
 | `internal/filestore/zones.go` | `GetZone`, `ListZones`, `PutZone`, `DeleteZone`, `GetRecords` |
-| `internal/filestore/blocklist.go` | BlocklistURL CRUD, domain lists, whitelist IPs |
+| `internal/filestore/blocklist.go` | BlocklistURL CRUD, domain lists, whitelist IPs, `GetBlockedDomainsWithCategories()` |
+| `internal/filestore/clientgroups.go` | `GetClientGroups()`, `SetClientGroups()` → `client_groups.json` |
 | `internal/filestore/auth.go` | `GetAuthConfig`, `UpdateAuthConfig`, `MarkSetupCompleted` |
 | `internal/filestore/config.go` | `GetConfigOverrides`, `UpdateConfigOverrides` |
 | `internal/filestore/atomic.go` | `atomicWriteJSON()`, `writeGzipDomains()`, `readGzipDomains()` |
@@ -154,6 +156,7 @@ All write operations use `temp-file + os.Rename()` (guaranteed atomic on Linux):
 | `auth_config` | Auth configuration (password hash, API key) |
 | `config_overrides` | Web UI configuration |
 | `tsig_keys` | TSIG keys for RFC 2136 DDNS |
+| `client_groups` | Client-Gruppen-Policies (IP ranges → categories) |
 
 All events are **full state** (no delta) → idempotent, no ordering issues.
 
@@ -189,7 +192,10 @@ Phase 1: Extract client IP
     ↓
 Phase 2: Blocklist check
     ├─ Client IP in whitelist? → Skip blocklist (trusted)
-    ├─ Domain blocked? → block_mode: 0.0.0.0/:: (zero_ip) or NXDOMAIN (nxdomain)
+    ├─ ClientGroupResolver.GetCategories(clientIP) → active categories
+    │       (no match → DefaultCategories: ["ads","malware"])
+    ├─ Domain blocked? (uncategorized always checked; categorized only if category in active cats)
+    │       → block_mode: 0.0.0.0/:: (zero_ip) or NXDOMAIN (nxdomain)
     └─ Not blocked →
         ↓
 Phase 3: Authoritative zone check (ZoneManager, in-memory)
@@ -199,9 +205,18 @@ Phase 3: Authoritative zone check (ZoneManager, in-memory)
     │       ↓
     │  Phase 3.6: ALIAS resolution (pipeline_alias.go)
     │       ├─ In-zone lookup of target → synthesized A/AAAA (Authoritative=true)
-    │       ├─ No in-zone hit → ForwardTracked() upstream → synthesized A/AAAA
-    │       └─ Target not resolvable → SERVFAIL
-    │       ⚠ Rebinding protection does NOT apply to ALIAS-synthesized responses
+    │       ├─ Target outside every local zone → upstream, deduplicated (A/AAAA only)
+    │       ├─ Target resolved, no record of the queried type → NODATA (NOERROR, empty)
+    │       ├─ Phase 5.5 applies here too: upstream answer → private IP → NXDOMAIN
+    │       └─ Target not resolvable at all → SERVFAIL
+    ├─ Zone present, CNAME at name, canonical name outside the zone (RFC 1034 §4.3.2) →
+    │       ↓
+    │  Phase 3.4: CNAME chase (pipeline_cname.go)
+    │       ├─ Target in another local zone (view-aware, further CNAMEs followed) → append A/AAAA
+    │       ├─ Target in no local zone → upstream, deduplicated (A/AAAA only)
+    │       ├─ Chain ends in an ALIAS → its A/AAAA under the ALIAS's name (ALIAS stays invisible)
+    │       ├─ Phase 5.5 applies here too: chased upstream answer → private IP → NXDOMAIN
+    │       └─ Loop / unresolvable → CNAME chain returned as-is, no duplicate RRs (NOERROR)
     ├─ Zone present + NXDOMAIN →
     │       ↓
     │  Phase 3.5: FWD fallback
@@ -239,7 +254,8 @@ Response to client
 - Rebinding check always AFTER upstream (Phase 5.5 > Phase 5)
 - Rebinding NOT for authoritative responses or cache hits — upstream responses only
 - Rebinding NOT for DDNS UPDATEs (separate handler path, Opcode=5)
-- Rebinding NOT for ALIAS-synthesized responses (written in Phase 3.6, before Phase 5.5)
+- Rebinding for an ALIAS-synthesized response runs inside Phase 3.6 itself — the answer is synthesized there, so Phase 5.5 is never reached
+- Rebinding for an out-of-zone CNAME chain runs inside Phase 3.4 itself — the query never reaches Phase 5, so the check has to happen there
 
 ### RFC 2136 DDNS
 
@@ -302,11 +318,24 @@ Internal record type (not an official DNS RR):
 - **Purpose:** Transparent CNAME-like resolution that works at the zone apex (`@`) and subdomains
 - **Configuration:** `value` is the target FQDN; `name` can be `@` or any subdomain label
 - **Only A/AAAA queries trigger resolution** — other types return NOERROR with empty answer
-- **Resolution order:** In-zone lookup first → upstream forwarder fallback
+- **Resolution order:** In-zone lookup first → upstream fallback. A target owned by a local zone is final: an empty authoritative answer is NODATA, and the name is not leaked to a public resolver
+- **Gates on the upstream fallback:** DNSSEC preparation and `ProcessResponse`, singleflight deduplication, and rebinding protection (Phase 5.5) — the upstream answer is synthesized into the client's answer, so the plain forward path is never reached for it
+- **Target resolved, no record of the queried type:** NODATA — NOERROR with an empty answer (RFC 2308 §2.2), never SERVFAIL. Stub resolvers query A and AAAA in parallel, so a SERVFAIL for the AAAA half fails the whole lookup (`ping: bad address`) even though the A record resolved
 - **Response:** Synthesized A/AAAA records (target TTL); ALIAS RR never visible to clients
 - **Pipeline:** Phase 3.6 — handled by `pipeline_alias.go` after `GenerateResponse()` signals `aliasTarget`
 - **Constraint:** ALIAS and CNAME cannot coexist at the same name (`ErrALIASConflict`)
-- **Known limitation (v1):** Rebinding protection does not apply to ALIAS-synthesized responses
+- **Known limitation (v1):** a chained ALIAS (the target itself being an ALIAS) is not supported; the lookup falls back to upstream resolution
+
+### CNAME with an out-of-zone target
+
+- **Purpose:** complete a CNAME chain for stub resolvers that do not follow CNAMEs themselves (musl/Alpine `ping`/`busybox nslookup`, glibc `getaddrinfo` → `EAI_NONAME`, i.e. `ping: bad address`). A plain authoritative server may answer with the CNAME only; DomU DNS is also a forwarder and can resolve the rest
+- **Trigger:** `GenerateResponse()` returns the canonical name it could not resolve inside the queried zone (`zoneResponse.cnameTarget`)
+- **Resolution order:** other local authoritative zones (view-aware, chains across several zones followed) → upstream forwarder, **A/AAAA queries only**, deduplicated via singleflight
+- **Response:** the CNAME RR(s) plus the target's records, which keep their canonical owner names (`Authoritative=true`); the CNAME stays visible — unlike ALIAS
+- **Pipeline:** Phase 3.4 — handled by `pipeline_cname.go`
+- **Gates on the chased upstream answer:** DNSSEC preparation/`ProcessResponse` and rebinding protection (Phase 5.5) — the plain forward path is never reached for such a query, so a chased lookup would otherwise bypass them
+- **Chain ends in an ALIAS:** the ALIAS's A/AAAA records are synthesized under the ALIAS's own name, so the chain is complete and the ALIAS stays invisible
+- **Loop / not resolvable:** the CNAME chain is returned unchanged (NOERROR) and without duplicate RRs — the same answer a plain authoritative server gives, so nothing that copes with CNAMEs regresses. Names already followed are tracked in a `seen` set, seeded with the queried name
 
 ### FWD Record
 
@@ -498,6 +527,35 @@ blocklist:
 ```
 
 Slaves do **not** fetch external URLs — only the master does.
+
+### Client-Gruppen-Policies
+
+Per-client-group blocklist category activation. IP ranges are mapped to groups; each group defines which categories are active for matching clients.
+
+**Categories:** `ads`, `malware`, `adult`, `social`, `gambling`, `tracking`
+
+**Resolution:**
+
+```
+ClientGroupResolver (atomic.Value, []resolvedGroup)
+    ├─ Client IP matches a group CIDR? → return that group's categories
+    ├─ Multiple groups match? → first-match-wins (order as configured)
+    └─ No match → DefaultCategories() = ["ads", "malware"]
+```
+
+**Uncategorized entries** (BlocklistURL.category = `""`) are always active for all clients regardless of group.
+
+**Wildcard/Regex patterns** are always uncategorized (always active, V1 scope).
+
+**API:** `GET/PUT /api/client-groups` — full-replace, cluster-synced via `EventClientGroups`.
+
+| Package | Contents |
+|---------|----------|
+| `internal/dns/categories.go` | Category constants + `ValidCategories` + `DefaultCategories()` |
+| `internal/dns/types.go` | `ClientGroup` struct (Name, CIDRs, Categories) |
+| `internal/dnsserver/clientgroups.go` | `ClientGroupResolver`: atomic.Value, CIDR-matching, `GetCategories()` |
+| `internal/filestore/clientgroups.go` | `GetClientGroups()`, `SetClientGroups()` → `client_groups.json` |
+| `internal/caddy/api/client_groups.go` | `ClientGroupsHandler` (GET/PUT /api/client-groups) |
 
 ### Block Response Mode
 
@@ -691,8 +749,21 @@ dns_queries_total{qtype="A", result="blocked"}
 dns_queries_total{qtype="A", result="cached"}
 dns_queries_total{qtype="A", result="authoritative"}
 dns_query_duration_seconds{result="forwarded"} (histogram)
+dns_queries_rate_limited_total   # queries refused by per-client rate limiting
+dns_queries_acl_denied_total     # queries refused by dnsserver.allowed_networks
 api_requests_total{method="GET", path="/api/zones", status="200"}
 ```
+
+**Access control:** `dnsserver.allowed_networks` (CIDRs/bare IPs) allowlists
+client networks; when set, other clients receive `REFUSED`. Empty = allow all.
+Live-reloadable via `PATCH /api/config`. Active ACME DNS-01 challenges
+(`_acme-challenge.*`) are exempt, so certificate issuance keeps working.
+
+**Rate limiting:** `system.rate_limit.dns_queries` enforces a per-client-IP token
+bucket before the pipeline runs (answers `REFUSED` on exceed); `api_requests`
+limits the HTTP API and DoH. `exempt_networks` (CIDRs/IPs) bypasses the DNS
+limiter, e.g. for a router that forwards the whole LAN from one IP. All settings
+support live reload via `PATCH /api/config`.
 
 ---
 

@@ -62,7 +62,7 @@ func NewPushFunc(masterURL, secret, nodeID string) PushFunc {
 		if err != nil {
 			return fmt.Errorf("push to master: %w", err)
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		_, _ = io.Copy(io.Discard, resp.Body)
 
 		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {

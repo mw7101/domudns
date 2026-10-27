@@ -22,7 +22,7 @@ func (p *DnsmasqParser) Parse(_ context.Context) ([]Lease, error) {
 	if err != nil {
 		return nil, fmt.Errorf("dnsmasq: open %s: %w", p.Path, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	now := time.Now()
 	var leases []Lease

@@ -19,8 +19,9 @@ func (s *FileStore) ListBlocklistURLs(_ context.Context) ([]store.BlocklistURL, 
 	return s.loadURLs()
 }
 
-// AddBlocklistURL adds a new blocklist URL.
-func (s *FileStore) AddBlocklistURL(_ context.Context, url string, enabled bool) (*store.BlocklistURL, error) {
+// AddBlocklistURL adds a new blocklist URL with an optional category.
+// category "" means uncategorized (always active for all clients).
+func (s *FileStore) AddBlocklistURL(_ context.Context, url string, category string, enabled bool) (*store.BlocklistURL, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -45,6 +46,7 @@ func (s *FileStore) AddBlocklistURL(_ context.Context, url string, enabled bool)
 	newURL := store.BlocklistURL{
 		ID:        maxID + 1,
 		URL:       url,
+		Category:  category,
 		Enabled:   enabled,
 		CreatedAt: now,
 	}
@@ -337,6 +339,112 @@ func isAllowed(domain string, allowedSet map[string]struct{}) bool {
 // GetBlockedDomains implements dnsserver.BlocklistStore.
 func (s *FileStore) GetBlockedDomains(ctx context.Context) ([]string, error) {
 	return s.GetMergedBlocklist(ctx)
+}
+
+// GetBlockedDomainsWithCategories returns all blocked domains with their category.
+// Manual domains (AddBlockedDomain) are returned with Category: "".
+// Implements dnsserver.BlocklistProvider.
+func (s *FileStore) GetBlockedDomainsWithCategories(_ context.Context) ([]store.BlockedDomainEntry, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	urls, err := s.loadURLs()
+	if err != nil {
+		return nil, err
+	}
+
+	// Load allowed domains for filtering
+	allowedDomains, err := s.loadStringList(s.allowedDomainsPath())
+	if err != nil {
+		return nil, err
+	}
+	allowedSet := make(map[string]struct{}, len(allowedDomains))
+	for _, d := range allowedDomains {
+		allowedSet[strings.ToLower(d)] = struct{}{}
+	}
+
+	var result []store.BlockedDomainEntry
+
+	// URL-sourced domains (carry their URL's category)
+	for _, u := range urls {
+		if !u.Enabled {
+			continue
+		}
+		domainPath := filepath.Join(s.urlDomainsDir(), fmt.Sprintf("%d.domains.gz", u.ID))
+		domains, err := readGzipDomains(domainPath)
+		if err != nil {
+			continue // domain file may not exist yet (URL not fetched)
+		}
+		for _, d := range domains {
+			norm := strings.ToLower(d)
+			if !isAllowed(norm, allowedSet) {
+				result = append(result, store.BlockedDomainEntry{Domain: norm, Category: u.Category})
+			}
+		}
+	}
+
+	// Manual domains — always uncategorized
+	manualDomains, err := s.loadStringList(s.manualDomainsPath())
+	if err != nil {
+		return nil, err
+	}
+	for _, d := range manualDomains {
+		norm := strings.ToLower(d)
+		if !isAllowed(norm, allowedSet) {
+			result = append(result, store.BlockedDomainEntry{Domain: norm, Category: ""})
+		}
+	}
+
+	if result == nil {
+		result = []store.BlockedDomainEntry{}
+	}
+	return result, nil
+}
+
+// GetBlocklistURLSets returns blocked domains grouped by URL ID and category.
+// Only enabled URLs are included. Implements dnsserver.BlocklistProvider.
+func (s *FileStore) GetBlocklistURLSets(_ context.Context) ([]store.URLDomainSet, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	urls, err := s.loadURLs()
+	if err != nil {
+		return nil, err
+	}
+
+	var result []store.URLDomainSet
+	for _, u := range urls {
+		if !u.Enabled {
+			continue
+		}
+		domainPath := filepath.Join(s.urlDomainsDir(), fmt.Sprintf("%d.domains.gz", u.ID))
+		domains, err := readGzipDomains(domainPath)
+		if err != nil {
+			continue // domain file may not exist yet (URL not yet fetched)
+		}
+		result = append(result, store.URLDomainSet{
+			URLID:    u.ID,
+			Category: u.Category,
+			Domains:  domains,
+		})
+	}
+	return result, nil
+}
+
+// GetManualBlockedDomains returns the manually blocked domains list.
+// Implements dnsserver.BlocklistProvider.
+func (s *FileStore) GetManualBlockedDomains(_ context.Context) ([]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.loadStringList(s.manualDomainsPath())
+}
+
+// GetAllowedBlockedDomains returns the allowed domains list (blocklist allowlist).
+// Implements dnsserver.BlocklistProvider.
+func (s *FileStore) GetAllowedBlockedDomains(_ context.Context) ([]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.loadStringList(s.allowedDomainsPath())
 }
 
 // GetWhitelistIPs implements dnsserver.BlocklistStore.

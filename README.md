@@ -27,7 +27,8 @@ Every existing DNS solution was either too heavy for a Raspberry Pi 3B or lacked
 | Master/Slave Cluster | ✅ | ❌ | ❌ | ✅ |
 | DoH + DoT | ✅ | Partial | ✅ | ✅ |
 | Let's Encrypt DNS-01 | ✅ | ❌ | ❌ | Partial |
-| DNSSEC signing | ✅ | ❌ | ❌ | ✅ |
+| DNSSEC signing | ❌ | ❌ | ❌ | ✅ |
+| DNSSEC (AD-flag delegation) | ✅ | Partial | ✅ | ✅ |
 | LRU Cache + Warming | ✅ | ❌ | ❌ | ❌ |
 | No database required | ✅ | ❌ | ✅ | ✅ |
 | Runtime | **Go binary** | C/FTL+dnsmasq | Go | .NET runtime |
@@ -44,6 +45,7 @@ Every existing DNS solution was either too heavy for a Raspberry Pi 3B or lacked
 - 🔒 **DoH + DoT** — RFC 8484 / RFC 7858 with your own certificates
 - 🔐 **Let's Encrypt DNS-01** — built-in ACME provider; Traefik httpreq, Certbot plugin, acme.sh/Proxmox
 - 🚫 **DNS Rebinding Protection** — blocks external domains resolving to private IPs
+- 🔐 **DNSSEC (AD-flag delegation)** — RFC 4035 stub-resolver mode: sets the DO bit upstream and propagates the AD bit; zones are not signed
 - ⚡ **LRU Cache + Warming** — preloads top-N query-log domains at startup
 - 📊 **Next.js Dashboard** — real-time stats, zone management, query log, cluster status
 - 🔁 **Zone Transfer AXFR/IXFR** — ACL-protected, TCP-only
@@ -95,7 +97,7 @@ open http://<PI_IP>/setup
 
 ### Prerequisites
 
-- Go 1.24+ (build machine only)
+- Go 1.27.3+ (build machine only — `go.mod` requires this patch level)
 - Raspberry Pi 3B with Debian Bookworm/Raspbian — or any Linux AMD64/ARM64/ARMv7
 - SSH access to the target host
 - Port 53 free (stop `systemd-resolved` if needed)
