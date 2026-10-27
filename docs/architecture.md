@@ -195,6 +195,13 @@ Phase 2: Blocklist check
 Phase 3: Authoritative zone check (ZoneManager, in-memory)
     ├─ Zone + record present? → Authoritative response (aa=true, 0ms)
     │       → TTL override (if zone.TTLOverride > 0): all response TTLs normalized (except SOA)
+    ├─ Zone present, A/AAAA query, ALIAS record at name, no direct A/AAAA →
+    │       ↓
+    │  Phase 3.6: ALIAS resolution (pipeline_alias.go)
+    │       ├─ In-zone lookup of target → synthesized A/AAAA (Authoritative=true)
+    │       ├─ No in-zone hit → ForwardTracked() upstream → synthesized A/AAAA
+    │       └─ Target not resolvable → SERVFAIL
+    │       ⚠ Rebinding protection does NOT apply to ALIAS-synthesized responses
     ├─ Zone present + NXDOMAIN →
     │       ↓
     │  Phase 3.5: FWD fallback
@@ -232,6 +239,7 @@ Response to client
 - Rebinding check always AFTER upstream (Phase 5.5 > Phase 5)
 - Rebinding NOT for authoritative responses or cache hits — upstream responses only
 - Rebinding NOT for DDNS UPDATEs (separate handler path, Opcode=5)
+- Rebinding NOT for ALIAS-synthesized responses (written in Phase 3.6, before Phase 5.5)
 
 ### RFC 2136 DDNS
 
@@ -286,6 +294,19 @@ Configuration-based forwarding rules (no zone entry required):
       - domain: "fritz.box"
         servers: ["192.168.178.1"]
   ```
+
+### ALIAS Record
+
+Internal record type (not an official DNS RR):
+
+- **Purpose:** Transparent CNAME-like resolution that works at the zone apex (`@`) and subdomains
+- **Configuration:** `value` is the target FQDN; `name` can be `@` or any subdomain label
+- **Only A/AAAA queries trigger resolution** — other types return NOERROR with empty answer
+- **Resolution order:** In-zone lookup first → upstream forwarder fallback
+- **Response:** Synthesized A/AAAA records (target TTL); ALIAS RR never visible to clients
+- **Pipeline:** Phase 3.6 — handled by `pipeline_alias.go` after `GenerateResponse()` signals `aliasTarget`
+- **Constraint:** ALIAS and CNAME cannot coexist at the same name (`ErrALIASConflict`)
+- **Known limitation (v1):** Rebinding protection does not apply to ALIAS-synthesized responses
 
 ### FWD Record
 

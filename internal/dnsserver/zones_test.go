@@ -1,6 +1,7 @@
 package dnsserver
 
 import (
+	"net"
 	"testing"
 
 	dnsinternal "github.com/mw7101/domudns/internal/dns"
@@ -138,7 +139,7 @@ func TestGenerateResponse_TTLOverride_Applied(t *testing.T) {
 
 	req := new(mdns.Msg)
 	req.SetQuestion("example.com.", mdns.TypeA)
-	resp := zm.GenerateResponse(req, zone, "@")
+	resp := zm.GenerateResponse(req, zone, "@").msg
 	if len(resp.Answer) == 0 {
 		t.Fatal("erwartet Antwort, got keine")
 	}
@@ -156,7 +157,7 @@ func TestGenerateResponse_TTLOverride_Zero_UsesRecordTTL(t *testing.T) {
 
 	req := new(mdns.Msg)
 	req.SetQuestion("example.com.", mdns.TypeA)
-	resp := zm.GenerateResponse(req, zone, "@")
+	resp := zm.GenerateResponse(req, zone, "@").msg
 	if len(resp.Answer) == 0 {
 		t.Fatal("erwartet Antwort, got keine")
 	}
@@ -180,7 +181,7 @@ func TestGenerateResponse_TTLOverride_SOA_NotAffected(t *testing.T) {
 
 	req := new(mdns.Msg)
 	req.SetQuestion("example.com.", mdns.TypeSOA)
-	resp := zm.GenerateResponse(req, zone, "@")
+	resp := zm.GenerateResponse(req, zone, "@").msg
 	if len(resp.Answer) == 0 {
 		t.Fatal("erwartet SOA Antwort, got keine")
 	}
@@ -207,7 +208,7 @@ func TestGenerateResponse_CNAME_AQuery_InZone(t *testing.T) {
 
 	req := new(mdns.Msg)
 	req.SetQuestion("homepage.example.com.", mdns.TypeA)
-	resp := zm.GenerateResponse(req, zone, "homepage")
+	resp := zm.GenerateResponse(req, zone, "homepage").msg
 
 	if len(resp.Answer) != 2 {
 		t.Fatalf("answer count = %d, want 2 (CNAME + A)", len(resp.Answer))
@@ -243,7 +244,7 @@ func TestGenerateResponse_CNAME_AQuery_ExternalTarget(t *testing.T) {
 
 	req := new(mdns.Msg)
 	req.SetQuestion("alias.example.com.", mdns.TypeA)
-	resp := zm.GenerateResponse(req, zone, "alias")
+	resp := zm.GenerateResponse(req, zone, "alias").msg
 
 	if len(resp.Answer) != 1 {
 		t.Fatalf("answer count = %d, want 1 (CNAME only)", len(resp.Answer))
@@ -269,13 +270,110 @@ func TestGenerateResponse_CNAME_CNAMEQuery(t *testing.T) {
 
 	req := new(mdns.Msg)
 	req.SetQuestion("alias.example.com.", mdns.TypeCNAME)
-	resp := zm.GenerateResponse(req, zone, "alias")
+	resp := zm.GenerateResponse(req, zone, "alias").msg
 
 	if len(resp.Answer) != 1 {
 		t.Fatalf("answer count = %d, want 1 (CNAME only for CNAME query)", len(resp.Answer))
 	}
 	if _, ok := resp.Answer[0].(*mdns.CNAME); !ok {
 		t.Fatalf("answer[0] type = %T, want *mdns.CNAME", resp.Answer[0])
+	}
+}
+
+func TestGenerateResponse_ALIAS_NonAB_Query_Returns_NOERROR_Empty(t *testing.T) {
+	zm := NewZoneManager()
+	zone := &dnsinternal.Zone{
+		Domain: "example.com",
+		TTL:    300,
+		Records: []dnsinternal.Record{
+			{ID: 1, Name: "@", Type: dnsinternal.TypeALIAS, TTL: 300, Value: "cdn.example.com"},
+		},
+	}
+	loadZonesManually(zm, zone)
+
+	req := new(mdns.Msg)
+	req.SetQuestion("example.com.", mdns.TypeMX)
+
+	zr := zm.GenerateResponse(req, zone, "@")
+	if zr.aliasTarget != "" {
+		t.Errorf("non-A/AAAA query should not set aliasTarget, got %q", zr.aliasTarget)
+	}
+	if zr.msg.Rcode != mdns.RcodeSuccess {
+		t.Errorf("expected NOERROR, got rcode %d", zr.msg.Rcode)
+	}
+	if len(zr.msg.Answer) != 0 {
+		t.Errorf("expected empty answer, got %d records", len(zr.msg.Answer))
+	}
+}
+
+func TestGenerateResponse_ALIAS_A_Query_Sets_AliasTarget(t *testing.T) {
+	zm := NewZoneManager()
+	zone := &dnsinternal.Zone{
+		Domain: "example.com",
+		TTL:    300,
+		Records: []dnsinternal.Record{
+			{ID: 1, Name: "@", Type: dnsinternal.TypeALIAS, TTL: 300, Value: "cdn.example.com"},
+		},
+	}
+	loadZonesManually(zm, zone)
+
+	req := new(mdns.Msg)
+	req.SetQuestion("example.com.", mdns.TypeA)
+
+	zr := zm.GenerateResponse(req, zone, "@")
+	if zr.aliasTarget != "cdn.example.com" {
+		t.Errorf("expected aliasTarget %q, got %q", "cdn.example.com", zr.aliasTarget)
+	}
+	if len(zr.msg.Answer) != 0 {
+		t.Errorf("msg shell must have empty answer, got %d", len(zr.msg.Answer))
+	}
+	if !zr.msg.Authoritative {
+		t.Error("msg shell must be Authoritative=true")
+	}
+}
+
+func TestGenerateResponse_ALIAS_ARecord_Wins_Over_ALIAS(t *testing.T) {
+	zm := NewZoneManager()
+	zone := &dnsinternal.Zone{
+		Domain: "example.com",
+		TTL:    300,
+		Records: []dnsinternal.Record{
+			{ID: 1, Name: "@", Type: dnsinternal.TypeA,     TTL: 300, Value: "1.2.3.4"},
+			{ID: 2, Name: "@", Type: dnsinternal.TypeALIAS, TTL: 300, Value: "cdn.example.com"},
+		},
+	}
+	loadZonesManually(zm, zone)
+
+	req := new(mdns.Msg)
+	req.SetQuestion("example.com.", mdns.TypeA)
+
+	zr := zm.GenerateResponse(req, zone, "@")
+	if zr.aliasTarget != "" {
+		t.Errorf("A record should win, aliasTarget must be empty, got %q", zr.aliasTarget)
+	}
+	if len(zr.msg.Answer) != 1 {
+		t.Errorf("expected 1 A record, got %d", len(zr.msg.Answer))
+	}
+}
+
+// TestGenerateResponse_ALIAS_AAAA_Query_Sets_AliasTarget verifies AAAA queries also signal ALIAS.
+func TestGenerateResponse_ALIAS_AAAA_Query_Sets_AliasTarget(t *testing.T) {
+	zm := NewZoneManager()
+	zone := &dnsinternal.Zone{
+		Domain: "example.com",
+		TTL:    300,
+		Records: []dnsinternal.Record{
+			{ID: 1, Name: "@", Type: dnsinternal.TypeALIAS, TTL: 300, Value: "cdn.example.com"},
+		},
+	}
+	loadZonesManually(zm, zone)
+
+	req := new(mdns.Msg)
+	req.SetQuestion("example.com.", mdns.TypeAAAA)
+
+	zr := zm.GenerateResponse(req, zone, "@")
+	if zr.aliasTarget != "cdn.example.com" {
+		t.Errorf("AAAA query: expected aliasTarget, got %q", zr.aliasTarget)
 	}
 }
 
@@ -294,5 +392,69 @@ func TestZoneManager_Stats(t *testing.T) {
 	}
 	if view != 2 {
 		t.Errorf("view zones = %d, want 2", view)
+	}
+}
+
+// TestAliasPhase_InZoneResolution tests the aliasPhase via a mock Handler.
+func TestAliasPhase_InZoneResolution(t *testing.T) {
+	zm := NewZoneManager()
+	targetZone := &dnsinternal.Zone{
+		Domain: "example.com",
+		TTL:    300,
+		Records: []dnsinternal.Record{
+			{ID: 1, Name: "target", Type: dnsinternal.TypeA, TTL: 600, Value: "5.6.7.8"},
+		},
+	}
+	aliasZone := &dnsinternal.Zone{
+		Domain: "alias.test",
+		TTL:    300,
+		Records: []dnsinternal.Record{
+			{ID: 2, Name: "@", Type: dnsinternal.TypeALIAS, TTL: 300, Value: "target.example.com"},
+		},
+	}
+	loadZonesManually(zm, targetZone, aliasZone)
+
+	h := &Handler{zones: zm}
+
+	req := new(mdns.Msg)
+	req.SetQuestion("alias.test.", mdns.TypeA)
+
+	shell := new(mdns.Msg)
+	shell.SetReply(req)
+	shell.Authoritative = true
+
+	zr := zoneResponse{msg: shell, aliasTarget: "target.example.com"}
+
+	// mockResponseWriter is defined in handler_test.go (same package dnsserver).
+	w := &mockResponseWriter{}
+	ctx := &queryContext{
+		req:      req,
+		w:        w,
+		clientIP: net.ParseIP("127.0.0.1"),
+		question: mdns.Question{Name: "alias.test.", Qtype: mdns.TypeA, Qclass: mdns.ClassINET},
+	}
+
+	result := h.aliasPhase(ctx, zr, "")
+	if !result.done {
+		t.Fatal("aliasPhase should return done=true")
+	}
+	if result.msg == nil || len(result.msg.Answer) == 0 {
+		t.Fatal("expected synthesized A record in answer")
+	}
+	a, ok := result.msg.Answer[0].(*mdns.A)
+	if !ok {
+		t.Fatalf("expected *mdns.A, got %T", result.msg.Answer[0])
+	}
+	if a.A.String() != "5.6.7.8" {
+		t.Errorf("expected 5.6.7.8, got %s", a.A)
+	}
+	if a.Hdr.Name != "alias.test." {
+		t.Errorf("synthesized RR name must be original query name, got %q", a.Hdr.Name)
+	}
+	if a.Hdr.Ttl != 600 {
+		t.Errorf("expected TTL 600 (from target), got %d", a.Hdr.Ttl)
+	}
+	if w.written == nil {
+		t.Error("aliasPhase must write response via ctx.w.WriteMsg")
 	}
 }

@@ -299,6 +299,7 @@ Content-Type: application/json
 **Supported record types:**
 - `A` - IPv4 address
 - `AAAA` - IPv6 address
+- `ALIAS` - Transparent apex alias (internal, resolves to A/AAAA; client never sees the ALIAS RR)
 - `CNAME` - Canonical Name
 - `MX` - Mail Exchange (requires `priority`)
 - `TXT` - Text record
@@ -308,6 +309,18 @@ Content-Type: application/json
 - `CAA` - Certification Authority Authorization
 - `PTR` - Pointer (for reverse DNS)
 - `FWD` - Fallback forwarding (internal, `name: "@"` only, not a DNS RR)
+
+**ALIAS Record Example:**
+```json
+{
+  "name": "@",
+  "type": "ALIAS",
+  "ttl": 3600,
+  "value": "cdn.example.com"
+}
+```
+
+**ALIAS behavior:** Resolves the target FQDN transparently and returns synthesized A/AAAA records to the client. Unlike CNAME, ALIAS is allowed at the zone apex (`@`) and subdomains. Only A and AAAA queries trigger resolution — other query types (MX, TXT, …) return NOERROR with an empty answer. Resolution order: in-zone lookup first, then upstream forwarder. TTL of the synthesized response equals the TTL of the resolved target records. ALIAS and CNAME at the same name is forbidden (`ErrALIASConflict`). A direct A or AAAA record at the same name takes precedence over ALIAS.
 
 **FWD Record Example:**
 ```json

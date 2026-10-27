@@ -116,8 +116,16 @@ func (z *ZoneManager) findByName(clientView, normalizedDomain string) *dns.Zone 
 	return nil
 }
 
+// zoneResponse carries the result of GenerateResponse.
+// When aliasTarget != "", msg is a NOERROR shell (Authoritative=true, empty Answer)
+// and pipeline_alias.go is responsible for populating the answer and writing the response.
+type zoneResponse struct {
+	msg         *mdns.Msg
+	aliasTarget string // "" = no ALIAS; non-empty = target FQDN to resolve
+}
+
 // GenerateResponse generates a DNS response for an authoritative zone.
-func (z *ZoneManager) GenerateResponse(req *mdns.Msg, zone *dns.Zone, subdomain string) *mdns.Msg {
+func (z *ZoneManager) GenerateResponse(req *mdns.Msg, zone *dns.Zone, subdomain string) zoneResponse {
 	resp := new(mdns.Msg)
 	resp.SetReply(req)
 	resp.Authoritative = true
@@ -127,7 +135,8 @@ func (z *ZoneManager) GenerateResponse(req *mdns.Msg, zone *dns.Zone, subdomain 
 
 	// Find matching records
 	var matchedRecords []dns.Record
-	var cnameRecords []dns.Record // CNAME records at this node (for CNAME chasing)
+	var cnameRecords []dns.Record  // CNAME records at this node (for CNAME chasing)
+	var aliasRecords []dns.Record  // ALIAS records for transparent resolution
 	for _, rec := range zone.Records {
 		// Normalize record name
 		recName := rec.Name
@@ -151,6 +160,13 @@ func (z *ZoneManager) GenerateResponse(req *mdns.Msg, zone *dns.Zone, subdomain 
 			if qtype == mdns.TypeCNAME || qtype == mdns.TypeANY {
 				matchedRecords = append(matchedRecords, rec)
 			}
+			continue
+		}
+
+		// ALIAS records are collected separately for transparent resolution.
+		if rec.Type == dns.TypeALIAS {
+			aliasRecords = append(aliasRecords, rec)
+			// Count ALIAS as "name exists" to suppress NXDOMAIN for non-A/AAAA queries (R3).
 			continue
 		}
 
@@ -205,6 +221,16 @@ func (z *ZoneManager) GenerateResponse(req *mdns.Msg, zone *dns.Zone, subdomain 
 		}
 	}
 
+	// R2/R4: trigger ALIAS resolution when A or AAAA is queried,
+	// no direct A/AAAA records exist, but ALIAS records do.
+	if len(resp.Answer) == 0 && len(aliasRecords) > 0 &&
+		(qtype == mdns.TypeA || qtype == mdns.TypeAAAA) {
+		return zoneResponse{
+			msg:         resp, // NOERROR shell, Authoritative=true, empty Answer
+			aliasTarget: aliasRecords[0].Value,
+		}
+	}
+
 	// If no records found but zone exists, set NOERROR (empty answer)
 	// If subdomain doesn't exist in zone, set NXDOMAIN
 	if len(resp.Answer) == 0 {
@@ -224,7 +250,7 @@ func (z *ZoneManager) GenerateResponse(req *mdns.Msg, zone *dns.Zone, subdomain 
 		}
 	}
 
-	return resp
+	return zoneResponse{msg: resp}
 }
 
 // recordToRR converts a dns.Record to a miekg/dns RR.
@@ -404,6 +430,8 @@ func (z *ZoneManager) recordToRR(zone *dns.Zone, rec dns.Record, subdomain strin
 
 	case dns.TypeFWD:
 		return nil // FWD does not produce a DNS RR
+	case dns.TypeALIAS:
+		return nil // ALIAS is resolved transparently in pipeline_alias.go
 	default:
 		// Unsupported record type
 		return nil

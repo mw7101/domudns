@@ -36,7 +36,18 @@ func (h *Handler) zonePhase(ctx *queryContext) pipelineResult {
 		Str("subdomain", subdomain).
 		Msg("authoritative zone match")
 
-	resp := h.zones.GenerateResponse(ctx.req, zone, subdomain)
+	zr := h.zones.GenerateResponse(ctx.req, zone, subdomain)
+
+	// ALIAS branch: delegate to aliasPhase for transparent A/AAAA resolution.
+	if zr.aliasTarget != "" {
+		log.Debug().
+			Str("qname", ctx.question.Name).
+			Str("alias_target", zr.aliasTarget).
+			Msg("ALIAS record: delegating to aliasPhase")
+		return h.aliasPhase(ctx, zr, clientView)
+	}
+
+	resp := zr.msg
 
 	// Phase 3.5: FWD fallback on NXDOMAIN.
 	if resp.Rcode == dns.RcodeNameError {
