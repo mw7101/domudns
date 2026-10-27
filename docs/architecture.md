@@ -240,27 +240,36 @@ DNS UPDATE messages (Opcode 5, RFC 2136) are handled separately from the normal 
 ```
 DNS UPDATE (Opcode=5, Port 53)
     ↓
+ddnsMsgAcceptFunc (MsgAcceptFunc on all dns.Server instances)
+    └─ OpcodeUpdate=5 → MsgAccept (bypasses miekg DefaultMsgAcceptFunc which rejects Opcode=5)
+    ↓
 DDNSHandler.Handle()
     ├─ No TSIG keys configured? → REFUSED
-    ├─ TSIG verification failed (w.TsigStatus() ≠ nil)? → NOTAUTH
+    ├─ TSIG verification failed (w.TsigStatus() ≠ nil)? → NOTAUTH (TSIG-signed response)
     ├─ No TSIG in message? → NOTAUTH
     └─ TSIG OK →
         ↓
     Check zone existence (Question section = zone name)
-    ├─ Zone not found? → NOTZONE
+    ├─ Zone not found? → NOTZONE (TSIG-signed response)
     └─ Zone found →
         ↓
     Process update section (for each RR in Ns section):
-        ├─ ClassINET: Add / update record
+        ├─ ClassINET: Upsert — delete existing records with same name+type, insert new one
         ├─ ClassNONE: Delete specific record (name + type + value)
-        └─ ClassANY:  Delete all records of this name
+        └─ ClassANY:  Delete all records of this name (optionally filtered by type)
         ↓
     ZoneReloader() → DNS server immediately reloads zone
     ↓
-    NOERROR (response signed with TSIG)
+    NOERROR (TSIG-signed response)
 ```
 
+**TSIG key names:** miekg/dns looks up key names as FQDNs with trailing dot. `UpdateKeys()` and `GetSecrets()` add trailing dots automatically before populating `TsigSecret`.
+
+**TSIG response signing:** `respond()` calls `resp.SetTsig()` before `w.WriteMsg()`. miekg only computes the response MAC when the response message already contains a TSIG RR.
+
 **TSIG key live reload:** `DDNSHandler.UpdateKeys()` swaps keys atomically without restart. Called automatically after API changes.
+
+**Runtime statistics:** `DDNSStats` struct tracks `TotalUpdates`, `TotalFailed`, `LastRejectedReason`, `LastRejectedAt`, `LastUpdateAt`. Exposed via `GET /api/ddns/status`.
 
 ### Conditional Forwarding
 
@@ -633,9 +642,10 @@ dnsserver:
 
 | Package | Contents |
 |---------|----------|
-| `internal/dnsserver/update.go` | `DDNSHandler`, `Handle()`, `applyUpdate()`, TSIG live reload |
+| `internal/dnsserver/update.go` | `DDNSHandler`, `Handle()`, `applyUpdate()`, `DDNSStats`, TSIG live reload |
+| `internal/dnsserver/server.go` | `ddnsMsgAcceptFunc` — accepts OpcodeUpdate, bypasses miekg default rejection |
 | `internal/filestore/tsig.go` | `GetTSIGKeys`, `PutTSIGKey`, `DeleteTSIGKey`, `SetTSIGKeys` |
-| `internal/caddy/api/ddns.go` | `DDNSAPIHandler`: REST API GET/POST/DELETE `/api/ddns/keys` |
+| `internal/caddy/api/ddns.go` | `DDNSAPIHandler`: REST API GET/POST/DELETE `/api/ddns/keys` + `GET /api/ddns/status` |
 | `internal/store/types.go` | `TSIGKey` struct (Name, Algorithm, Secret, CreatedAt) |
 
 ### Data Storage

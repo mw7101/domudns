@@ -17,10 +17,28 @@ type DDNSKeyUpdater interface {
 	UpdateTSIGKeys(keys []store.TSIGKey)
 }
 
+// DDNSRuntimeStats enthält die für die API relevanten Laufzeitdaten des DDNS-Handlers.
+type DDNSRuntimeStats struct {
+	TotalUpdates       int64
+	LastUpdateAt       time.Time
+	TotalFailed        int64
+	LastError          string
+	LastErrorAt        time.Time
+	LastRejectedReason string
+	LastRejectedAt     time.Time
+}
+
+// DDNSStatsProvider liefert aktuelle DDNS-Laufzeitdaten.
+// Implementiert von *dnsserver.DDNSHandler via Adapter in main.go.
+type DDNSStatsProvider interface {
+	GetDDNSStats() DDNSRuntimeStats
+}
+
 // DDNSAPIHandler manages TSIG keys for RFC 2136 DDNS via the REST API.
 type DDNSAPIHandler struct {
-	store      TSIGKeyStore
-	keyUpdater DDNSKeyUpdater
+	store         TSIGKeyStore
+	keyUpdater    DDNSKeyUpdater
+	statsProvider DDNSStatsProvider
 }
 
 // NewDDNSAPIHandler creates a new DDNSAPIHandler.
@@ -29,6 +47,11 @@ func NewDDNSAPIHandler(store TSIGKeyStore, keyUpdater DDNSKeyUpdater) *DDNSAPIHa
 		store:      store,
 		keyUpdater: keyUpdater,
 	}
+}
+
+// SetStatsProvider setzt den DDNS-Stats-Provider (kann nach Initialisierung gesetzt werden).
+func (h *DDNSAPIHandler) SetStatsProvider(p DDNSStatsProvider) {
+	h.statsProvider = p
 }
 
 // tsigKeyResponse is the publicly visible key without the secret.
@@ -52,9 +75,22 @@ type createKeyRequest struct {
 	Algorithm string `json:"algorithm"`
 }
 
-// ServeHTTP routes DDNS key requests.
+// ServeHTTP routes DDNS requests.
 func (h *DDNSAPIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	path := strings.TrimPrefix(r.URL.Path, "/api/ddns/keys")
+	urlPath := r.URL.Path
+
+	// Status endpoint
+	if urlPath == "/api/ddns/status" {
+		if r.Method == http.MethodGet {
+			h.getStatus(w, r)
+		} else {
+			writeError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed")
+		}
+		return
+	}
+
+	// Keys endpoint
+	path := strings.TrimPrefix(urlPath, "/api/ddns/keys")
 	path = strings.Trim(path, "/")
 
 	switch r.Method {
@@ -82,6 +118,43 @@ func (h *DDNSAPIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed")
 	}
+}
+
+func (h *DDNSAPIHandler) getStatus(w http.ResponseWriter, r *http.Request) {
+	type ddnsStatusResponse struct {
+		KeyCount           int    `json:"key_count"`
+		TotalUpdates       int64  `json:"total_updates"`
+		LastUpdateAt       string `json:"last_update_at"`
+		TotalFailed        int64  `json:"total_failed"`
+		LastError          string `json:"last_error"`
+		LastErrorAt        string `json:"last_error_at"`
+		LastRejectedReason string `json:"last_rejected_reason"`
+		LastRejectedAt     string `json:"last_rejected_at"`
+	}
+
+	keys, _ := h.store.GetTSIGKeys(r.Context())
+	resp := ddnsStatusResponse{
+		KeyCount: len(keys),
+	}
+
+	if h.statsProvider != nil {
+		s := h.statsProvider.GetDDNSStats()
+		resp.TotalUpdates = s.TotalUpdates
+		resp.TotalFailed = s.TotalFailed
+		resp.LastRejectedReason = s.LastRejectedReason
+		if !s.LastUpdateAt.IsZero() {
+			resp.LastUpdateAt = s.LastUpdateAt.Format(time.RFC3339)
+		}
+		resp.LastError = s.LastError
+		if !s.LastErrorAt.IsZero() {
+			resp.LastErrorAt = s.LastErrorAt.Format(time.RFC3339)
+		}
+		if !s.LastRejectedAt.IsZero() {
+			resp.LastRejectedAt = s.LastRejectedAt.Format(time.RFC3339)
+		}
+	}
+
+	writeSuccess(w, resp, http.StatusOK)
 }
 
 func (h *DDNSAPIHandler) listKeys(w http.ResponseWriter, r *http.Request) {

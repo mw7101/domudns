@@ -129,6 +129,41 @@ EOF
 dig testhost.home @192.0.2.151
 ```
 
+## ClassINET Semantics (Upsert)
+
+When dhcpd sends an UPDATE with ClassINET (Add), DomU DNS uses **upsert semantics**:
+existing records with the same name and type are deleted before the new record is inserted.
+This means:
+
+- **IP change:** old A record is automatically replaced — no duplicate
+- **dhcpd retry:** same record sent multiple times → only one A record exists
+
+## DDNS Runtime Status
+
+Check the DDNS handler status at any time:
+
+```bash
+curl -H "Authorization: Bearer YOUR_API_KEY" \
+  http://192.0.2.151/api/ddns/status
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "key_count": 1,
+    "total_updates": 42,
+    "last_update_at": "2026-03-07T10:00:00Z",
+    "total_failed": 0,
+    "last_rejected_reason": "",
+    "last_rejected_at": null
+  }
+}
+```
+
+The dashboard (`DHCP / DDNS` page) shows the same stats as a card grid with contextual diagnosis banners (NOTZONE, NOTAUTH).
+
 ## Priorities
 
 If a device name exists both as a static zone record and as a DDNS record,
@@ -191,12 +226,25 @@ The zone must exist in DomU DNS as an authoritative zone.
 ### No A record created
 
 ```bash
+# Check DDNS stats (total_updates, last_rejected_reason)
+curl -H "Authorization: Bearer KEY" http://192.0.2.151/api/ddns/status
+
 # List DDNS keys
 curl -H "Authorization: Bearer KEY" http://192.0.2.151/api/ddns/keys
 
 # Check dhcpd UPDATE log
 sudo journalctl -u isc-dhcp-server | grep -i "ddns\|update"
+
+# Check DomU DNS logs for UPDATE arrival
+sudo journalctl -u domudns | grep -i "ddns"
 ```
+
+### dhcpd reports "expected a TSIG or SIG(0)"
+
+This was a known bug in DomU DNS (fixed 2026-03-07): the server processed the UPDATE
+successfully (A record was created) but did not sign the response with TSIG. dhcpd and
+nsupdate treated the unsigned response as a failure. Fixed in current version — responses
+are now properly TSIG-signed.
 
 ---
 

@@ -332,6 +332,162 @@ func TestDDNS_UpdateKeys_LiveReload(t *testing.T) {
 	}
 }
 
+func TestDDNS_Stats_SuccessfulUpdate(t *testing.T) {
+	st := newMockDDNSStore()
+	st.zones["home"] = &dns.Zone{Domain: "home"}
+
+	h := NewDDNSHandler(st, nil)
+	h.UpdateKeys([]store.TSIGKey{{Name: "k", Algorithm: "hmac-sha256", Secret: "bXlzZWNyZXRrZXkxMjM0NQ=="}})
+
+	rr := &miekgdns.A{
+		Hdr: miekgdns.RR_Header{Name: "host.home.", Rrtype: miekgdns.TypeA, Class: miekgdns.ClassINET, Ttl: 60},
+		A:   net.ParseIP("10.0.0.1"),
+	}
+	msg := makeATsigMsg("home.", "k", "bXlzZWNyZXRrZXkxMjM0NQ==", []miekgdns.RR{rr})
+	w := newDDNSMockRW()
+	h.Handle(w, msg)
+
+	stats := h.GetStats()
+	if stats.TotalUpdates != 1 {
+		t.Errorf("TotalUpdates = %d, want 1", stats.TotalUpdates)
+	}
+	if stats.TotalFailed != 0 {
+		t.Errorf("TotalFailed = %d, want 0", stats.TotalFailed)
+	}
+	if stats.LastUpdateAt.IsZero() {
+		t.Error("LastUpdateAt sollte gesetzt sein")
+	}
+}
+
+func TestDDNS_Stats_NotZoneRejection(t *testing.T) {
+	st := newMockDDNSStore()
+	// Zone "missing" existiert nicht
+
+	h := NewDDNSHandler(st, nil)
+	h.UpdateKeys([]store.TSIGKey{{Name: "k", Algorithm: "hmac-sha256", Secret: "bXlzZWNyZXRrZXkxMjM0NQ=="}})
+
+	msg := makeATsigMsg("missing.", "k", "bXlzZWNyZXRrZXkxMjM0NQ==", nil)
+	w := newDDNSMockRW()
+	h.Handle(w, msg)
+
+	if w.written.Rcode != miekgdns.RcodeNotZone {
+		t.Fatalf("erwartet NOTZONE, bekam %d", w.written.Rcode)
+	}
+
+	stats := h.GetStats()
+	if stats.TotalFailed != 1 {
+		t.Errorf("TotalFailed = %d, want 1", stats.TotalFailed)
+	}
+	if stats.TotalUpdates != 0 {
+		t.Errorf("TotalUpdates = %d, want 0", stats.TotalUpdates)
+	}
+	if stats.LastRejectedReason != "NOTZONE: missing" {
+		t.Errorf("LastRejectedReason = %q, want %q", stats.LastRejectedReason, "NOTZONE: missing")
+	}
+	if stats.LastRejectedAt.IsZero() {
+		t.Error("LastRejectedAt sollte gesetzt sein")
+	}
+}
+
+func TestDDNS_Stats_NotAuthRejection(t *testing.T) {
+	st := newMockDDNSStore()
+	st.zones["home"] = &dns.Zone{Domain: "home"}
+
+	h := NewDDNSHandler(st, nil)
+	h.UpdateKeys([]store.TSIGKey{{Name: "k", Algorithm: "hmac-sha256", Secret: "secret=="}})
+
+	rr := &miekgdns.A{
+		Hdr: miekgdns.RR_Header{Name: "host.home.", Rrtype: miekgdns.TypeA, Class: miekgdns.ClassINET, Ttl: 60},
+		A:   net.ParseIP("10.0.0.1"),
+	}
+	msg := makeATsigMsg("home.", "k", "secret==", []miekgdns.RR{rr})
+	w := newDDNSMockRW()
+	w.tsigStatus = miekgdns.ErrSig // TSIG-Verifikation fehlgeschlagen
+
+	h.Handle(w, msg)
+
+	if w.written.Rcode != miekgdns.RcodeNotAuth {
+		t.Fatalf("erwartet NOTAUTH, bekam %d", w.written.Rcode)
+	}
+
+	stats := h.GetStats()
+	if stats.TotalFailed != 1 {
+		t.Errorf("TotalFailed = %d, want 1", stats.TotalFailed)
+	}
+	if stats.LastRejectedReason != "NOTAUTH: TSIG-Verifikation fehlgeschlagen" {
+		t.Errorf("LastRejectedReason = %q", stats.LastRejectedReason)
+	}
+}
+
+func TestDDNS_Stats_AccumulatesAcrossMultipleCalls(t *testing.T) {
+	st := newMockDDNSStore()
+	st.zones["home"] = &dns.Zone{Domain: "home"}
+
+	h := NewDDNSHandler(st, nil)
+	h.UpdateKeys([]store.TSIGKey{{Name: "k", Algorithm: "hmac-sha256", Secret: "bXlzZWNyZXRrZXkxMjM0NQ=="}})
+
+	// 2 erfolgreiche Updates
+	for i := 0; i < 2; i++ {
+		rr := &miekgdns.A{
+			Hdr: miekgdns.RR_Header{Name: "host.home.", Rrtype: miekgdns.TypeA, Class: miekgdns.ClassINET, Ttl: 60},
+			A:   net.ParseIP("10.0.0.1"),
+		}
+		msg := makeATsigMsg("home.", "k", "bXlzZWNyZXRrZXkxMjM0NQ==", []miekgdns.RR{rr})
+		h.Handle(newDDNSMockRW(), msg)
+	}
+
+	// 1 fehlgeschlagenes Update (falsche Zone)
+	msg := makeATsigMsg("unknown.", "k", "bXlzZWNyZXRrZXkxMjM0NQ==", nil)
+	h.Handle(newDDNSMockRW(), msg)
+
+	stats := h.GetStats()
+	if stats.TotalUpdates != 2 {
+		t.Errorf("TotalUpdates = %d, want 2", stats.TotalUpdates)
+	}
+	if stats.TotalFailed != 1 {
+		t.Errorf("TotalFailed = %d, want 1", stats.TotalFailed)
+	}
+}
+
+// TestDDNS_TsigSecret_TrailingDot stellt sicher, dass GetSecrets() und der
+// keyUpdater-Callback die Key-Namen mit Trailing Dot liefern.
+// miekg/dns sucht in TsigSecret mit FQDN (z.B. "dhcp-dns."), nicht "dhcp-dns".
+// Ohne Trailing Dot schlägt der Lookup fehl → NOTAUTH statt Erfolg.
+func TestDDNS_TsigSecret_TrailingDot(t *testing.T) {
+	st := newMockDDNSStore()
+	h := NewDDNSHandler(st, nil)
+
+	var capturedSecrets map[string]string
+	h.keyUpdater = func(s map[string]string) {
+		capturedSecrets = s
+	}
+
+	h.UpdateKeys([]store.TSIGKey{
+		{Name: "dhcp-dns", Algorithm: "hmac-sha256", Secret: "c2VjcmV0"},
+		{Name: "already.dot.", Algorithm: "hmac-sha256", Secret: "c2VjcmV0Mg=="},
+	})
+
+	// keyUpdater muss trailing dots enthalten
+	if _, ok := capturedSecrets["dhcp-dns."]; !ok {
+		t.Errorf("TsigSecret: key 'dhcp-dns.' fehlt, bekam: %v", capturedSecrets)
+	}
+	if _, ok := capturedSecrets["dhcp-dns"]; ok {
+		t.Errorf("TsigSecret: key 'dhcp-dns' ohne Trailing Dot sollte nicht vorhanden sein")
+	}
+	if _, ok := capturedSecrets["already.dot."]; !ok {
+		t.Errorf("TsigSecret: key 'already.dot.' fehlt")
+	}
+
+	// GetSecrets() muss ebenfalls trailing dots liefern (für initiale TsigSecret-Befüllung)
+	secrets := h.GetSecrets()
+	if _, ok := secrets["dhcp-dns."]; !ok {
+		t.Errorf("GetSecrets: key 'dhcp-dns.' fehlt, bekam: %v", secrets)
+	}
+	if _, ok := secrets["dhcp-dns"]; ok {
+		t.Errorf("GetSecrets: key 'dhcp-dns' ohne Trailing Dot sollte nicht vorhanden sein")
+	}
+}
+
 func TestNormalizeRRName(t *testing.T) {
 	tests := []struct {
 		fqdn     string

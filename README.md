@@ -225,7 +225,7 @@ After startup the web UI is available at:
 - ✅ **Overview statistics:** Top clients, top domains, top blocks, QPS time series (Recharts)
 - ✅ **Query Log:** Searchable table of all DNS queries (live refresh 5s, filter by client/domain/result)
 - ✅ **Query Log action menu:** Add a blocked domain to the whitelist with one click
-- ✅ **DDNS page:** Create/delete TSIG keys, display ISC dhcpd configuration example
+- ✅ **DDNS page:** Create/delete TSIG keys, runtime stats (total updates, failures, last rejection), contextual diagnosis banners (NOTZONE, NOTAUTH), pre-filled ISC dhcpd config guide
 - ✅ **Zone TTL Override:** Optionally configurable per zone — normalizes all response TTLs (except SOA)
 
 ## REST API Examples

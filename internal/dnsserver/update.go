@@ -20,6 +20,18 @@ type DDNSStore interface {
 	DeleteRecord(ctx context.Context, zoneDomain string, recordID int) error
 }
 
+// DDNSStats enthält laufende Statistiken des DDNS-Handlers.
+type DDNSStats struct {
+	TotalUpdates  int64
+	LastUpdateAt  time.Time
+	TotalFailed   int64
+	LastError     string
+	LastErrorAt   time.Time
+	// LastRejectedReason gibt den Grund der letzten Ablehnung an (z.B. "NOTZONE: example.local", "NOTAUTH").
+	LastRejectedReason string
+	LastRejectedAt     time.Time
+}
+
 // DDNSHandler processes RFC 2136 UPDATE messages (Opcode=5).
 // TSIG verification is done via miekg/dns ResponseWriter.TsigStatus() interface:
 // The DNS server must be configured with TsigSecret — the handler only implements
@@ -32,6 +44,9 @@ type DDNSHandler struct {
 	zoneReloader func()
 	// keyUpdater is called when keys change so the DNS server can update TsigSecret.
 	keyUpdater func(map[string]string)
+
+	statsMu sync.Mutex
+	stats   DDNSStats
 }
 
 // NewDDNSHandler creates a new DDNSHandler.
@@ -57,9 +72,18 @@ func (h *DDNSHandler) SetZoneReloader(fn func()) {
 func (h *DDNSHandler) UpdateKeys(keys []store.TSIGKey) {
 	secrets := make(map[string]string, len(keys))
 	algorithms := make(map[string]string, len(keys))
+	// miekg/dns looks up key names with trailing dot (FQDN) in TsigSecret.
+	// dhcpd sends TSIG with key name "dhcp-dns." — without the trailing dot
+	// the map lookup fails and TsigStatus() returns an error → NOTAUTH.
+	tsigSecrets := make(map[string]string, len(keys))
 	for _, k := range keys {
 		secrets[k.Name] = k.Secret
 		algorithms[k.Name] = tsigAlgorithmURI(k.Algorithm)
+		fqdn := k.Name
+		if !strings.HasSuffix(fqdn, ".") {
+			fqdn += "."
+		}
+		tsigSecrets[fqdn] = k.Secret
 	}
 
 	h.mu.Lock()
@@ -67,33 +91,60 @@ func (h *DDNSHandler) UpdateKeys(keys []store.TSIGKey) {
 	h.algorithms = algorithms
 	h.mu.Unlock()
 
-	// Update DNS server TsigSecret
+	// Update DNS server TsigSecret (with trailing dots for miekg lookup)
 	if h.keyUpdater != nil {
-		h.keyUpdater(secrets)
+		h.keyUpdater(tsigSecrets)
 	}
 
 	log.Info().Int("count", len(keys)).Msg("ddns: TSIG keys updated")
 }
 
-// GetSecrets returns a copy of the current secrets map (for DNS server).
+// GetStats gibt eine Snapshot-Kopie der aktuellen DDNS-Statistiken zurück.
+func (h *DDNSHandler) GetStats() DDNSStats {
+	h.statsMu.Lock()
+	defer h.statsMu.Unlock()
+	return h.stats
+}
+
+// recordRejection zählt eine abgelehnte UPDATE-Anfrage mit Grund.
+func (h *DDNSHandler) recordRejection(reason string) {
+	h.statsMu.Lock()
+	h.stats.TotalFailed++
+	h.stats.LastRejectedReason = reason
+	h.stats.LastRejectedAt = time.Now().UTC()
+	h.statsMu.Unlock()
+}
+
+// GetSecrets returns a copy of the secrets map with trailing dots (for miekg TsigSecret).
 func (h *DDNSHandler) GetSecrets() map[string]string {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	cp := make(map[string]string, len(h.secrets))
 	for k, v := range h.secrets {
-		cp[k] = v
+		fqdn := k
+		if !strings.HasSuffix(fqdn, ".") {
+			fqdn += "."
+		}
+		cp[fqdn] = v
 	}
 	return cp
 }
 
 // Handle verarbeitet eine RFC 2136 UPDATE-Nachricht.
 func (h *DDNSHandler) Handle(w miekgdns.ResponseWriter, r *miekgdns.Msg) {
+	log.Info().
+		Str("remote", w.RemoteAddr().String()).
+		Msg("ddns: RFC 2136 UPDATE empfangen")
+
 	h.mu.RLock()
 	hasKeys := len(h.secrets) > 0
 	h.mu.RUnlock()
 
 	// No keys configured → reject all UPDATEs
 	if !hasKeys {
+		log.Warn().
+			Str("remote", w.RemoteAddr().String()).
+			Msg("ddns: UPDATE abgelehnt — keine TSIG-Keys konfiguriert")
 		h.respond(w, r, miekgdns.RcodeRefused)
 		return
 	}
@@ -104,15 +155,17 @@ func (h *DDNSHandler) Handle(w miekgdns.ResponseWriter, r *miekgdns.Msg) {
 			Err(w.TsigStatus()).
 			Str("remote", w.RemoteAddr().String()).
 			Msg("ddns: TSIG-Verifikation fehlgeschlagen")
+		h.recordRejection("NOTAUTH: TSIG-Verifikation fehlgeschlagen")
 		h.respond(w, r, miekgdns.RcodeNotAuth)
 		return
 	}
 
 	// No TSIG in message but keys configured → NOTAUTH
 	if r.IsTsig() == nil {
-		log.Debug().
+		log.Warn().
 			Str("remote", w.RemoteAddr().String()).
 			Msg("ddns: UPDATE ohne TSIG abgelehnt (Keys konfiguriert)")
+		h.recordRejection("NOTAUTH: UPDATE ohne TSIG")
 		h.respond(w, r, miekgdns.RcodeNotAuth)
 		return
 	}
@@ -135,9 +188,10 @@ func (h *DDNSHandler) processUpdate(w miekgdns.ResponseWriter, r *miekgdns.Msg) 
 	zoneDomain := strings.TrimSuffix(zoneName, ".")
 	zone, err := h.store.GetZone(ctx, zoneDomain)
 	if err != nil || zone == nil {
-		log.Debug().
+		log.Warn().
 			Str("zone", zoneDomain).
-			Msg("ddns: Zone nicht gefunden")
+			Msg("ddns: Zone nicht gefunden — Zone muss in DomU DNS angelegt sein")
+		h.recordRejection("NOTZONE: " + zoneDomain)
 		h.respond(w, r, miekgdns.RcodeNotZone)
 		return
 	}
@@ -150,6 +204,13 @@ func (h *DDNSHandler) processUpdate(w miekgdns.ResponseWriter, r *miekgdns.Msg) 
 				Str("zone", zoneDomain).
 				Str("rr", rr.String()).
 				Msg("ddns: Update-Record fehlgeschlagen")
+			h.statsMu.Lock()
+			h.stats.TotalFailed++
+			h.stats.LastError = err.Error()
+			h.stats.LastErrorAt = time.Now().UTC()
+			h.stats.LastRejectedReason = "SERVFAIL: " + err.Error()
+			h.stats.LastRejectedAt = time.Now().UTC()
+			h.statsMu.Unlock()
 			h.respond(w, r, miekgdns.RcodeServerFailure)
 			return
 		}
@@ -169,6 +230,11 @@ func (h *DDNSHandler) processUpdate(w miekgdns.ResponseWriter, r *miekgdns.Msg) 
 		Str("remote", w.RemoteAddr().String()).
 		Msg("ddns: UPDATE erfolgreich")
 
+	h.statsMu.Lock()
+	h.stats.TotalUpdates++
+	h.stats.LastUpdateAt = time.Now().UTC()
+	h.statsMu.Unlock()
+
 	h.respond(w, r, miekgdns.RcodeSuccess)
 }
 
@@ -178,7 +244,7 @@ func (h *DDNSHandler) applyUpdate(ctx context.Context, zone *dns.Zone, rr miekgd
 
 	switch hdr.Class {
 	case miekgdns.ClassINET:
-		// Add or update record
+		// Add or update record (Upsert-Semantik)
 		record, err := rrToRecord(rr, zone.Domain)
 		if err != nil {
 			return err
@@ -186,6 +252,18 @@ func (h *DDNSHandler) applyUpdate(ctx context.Context, zone *dns.Zone, rr miekgd
 		if record == nil {
 			log.Debug().Str("type", miekgdns.TypeToString[hdr.Rrtype]).Msg("ddns: RR-Typ nicht unterstützt, ignoriert")
 			return nil
+		}
+		// Upsert: existierende Records gleichen Namens+Typs zuerst löschen,
+		// damit dhcpd-Retries und IP-Wechsel keine Duplikate erzeugen.
+		existing, listErr := h.store.GetRecords(ctx, zone.Domain)
+		if listErr == nil {
+			for _, ex := range existing {
+				if ex.Name == record.Name && string(ex.Type) == string(record.Type) {
+					if err := h.store.DeleteRecord(ctx, zone.Domain, ex.ID); err != nil {
+						log.Warn().Err(err).Int("id", ex.ID).Msg("ddns: Upsert — alter Record konnte nicht gelöscht werden")
+					}
+				}
+			}
 		}
 		return h.store.PutRecord(ctx, zone.Domain, record)
 
@@ -266,10 +344,15 @@ func (h *DDNSHandler) deleteRecordsByName(ctx context.Context, zone *dns.Zone, r
 	return nil
 }
 
-// respond sends a response (miekg server signs it automatically with TSIG if configured).
+// respond sends a TSIG-signed response.
+// miekg signs the response only when the response message itself contains a TSIG RR —
+// it does NOT add TSIG automatically. We call SetTsig() so WriteMsg() can compute the MAC.
 func (h *DDNSHandler) respond(w miekgdns.ResponseWriter, r *miekgdns.Msg, rcode int) {
 	resp := new(miekgdns.Msg)
 	resp.SetRcode(r, rcode)
+	if t := r.IsTsig(); t != nil {
+		resp.SetTsig(t.Hdr.Name, t.Algorithm, 300, time.Now().Unix())
+	}
 	if err := w.WriteMsg(resp); err != nil {
 		log.Error().Err(err).Msg("ddns: response write failed")
 	}

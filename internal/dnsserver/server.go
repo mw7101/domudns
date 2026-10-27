@@ -95,19 +95,21 @@ func New(cfg Config) *Server {
 
 	// UDP server
 	s.udpServer = &dns.Server{
-		Addr:    cfg.Listen,
-		Net:     "udp",
-		Handler: handler,
-		UDPSize: cfg.UDPSize,
+		Addr:            cfg.Listen,
+		Net:             "udp",
+		Handler:         handler,
+		UDPSize:         cfg.UDPSize,
+		MsgAcceptFunc:   ddnsMsgAcceptFunc,
 	}
 
 	// TCP server
 	s.tcpServer = &dns.Server{
-		Addr:         cfg.Listen,
-		Net:          "tcp",
-		Handler:      handler,
-		ReadTimeout:  cfg.TCPTimeout,
-		WriteTimeout: cfg.TCPTimeout,
+		Addr:            cfg.Listen,
+		Net:             "tcp",
+		Handler:         handler,
+		ReadTimeout:     cfg.TCPTimeout,
+		WriteTimeout:    cfg.TCPTimeout,
+		MsgAcceptFunc:   ddnsMsgAcceptFunc,
 	}
 
 	// DoT server (DNS over TLS, RFC 7858) — only when enabled + certificate present
@@ -121,10 +123,11 @@ func New(cfg Config) *Server {
 				MinVersion:   tls.VersionTLS12,
 			}
 			s.dotServer = &dns.Server{
-				Addr:      cfg.DoTListen,
-				Net:       "tcp-tls",
-				Handler:   handler,
-				TLSConfig: tlsCfg,
+				Addr:          cfg.DoTListen,
+				Net:           "tcp-tls",
+				Handler:       handler,
+				TLSConfig:     tlsCfg,
+				MsgAcceptFunc: ddnsMsgAcceptFunc,
 			}
 		}
 	} else if cfg.DoTEnabled {
@@ -325,4 +328,21 @@ func (s *Server) Start(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// ddnsMsgAcceptFunc extends DefaultMsgAcceptFunc to also accept RFC 2136 UPDATE messages.
+// miekg/dns DefaultMsgAcceptFunc explicitly rejects OpcodeUpdate with RcodeNotImplemented,
+// because the section count semantics differ from regular queries.
+// We override this so our DDNSHandler receives UPDATE packets.
+func ddnsMsgAcceptFunc(dh dns.Header) dns.MsgAcceptAction {
+	// Ignore responses (QR bit set) — same as DefaultMsgAcceptFunc
+	if dh.Bits&(1<<15) != 0 {
+		return dns.MsgIgnore
+	}
+	// Accept RFC 2136 UPDATE messages (OpcodeUpdate = 5)
+	opcode := int(dh.Bits>>11) & 0xF
+	if opcode == dns.OpcodeUpdate {
+		return dns.MsgAccept
+	}
+	return dns.DefaultMsgAcceptFunc(dh)
 }

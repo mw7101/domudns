@@ -381,6 +381,17 @@ export interface TSIGKeyCreateResponse extends TSIGKey {
   secret: string // only returned on creation
 }
 
+export interface DDNSStatus {
+  key_count: number
+  total_updates: number
+  last_update_at: string      // RFC3339 oder "" wenn noch kein Update
+  total_failed: number
+  last_error: string          // "" wenn kein Fehler
+  last_error_at: string       // RFC3339 oder "" wenn noch kein Fehler
+  last_rejected_reason: string // z.B. "NOTZONE: example.local" oder ""
+  last_rejected_at: string    // RFC3339 oder ""
+}
+
 export const ddns = {
   listKeys: () => request<{ data: TSIGKey[] }>('/ddns/keys'),
   createKey: (payload: { name: string; algorithm?: string }) =>
@@ -400,6 +411,7 @@ export const ddns = {
         throw new ApiError(msg, res.status)
       }
     }),
+  getStatus: () => request<{ data: DDNSStatus }>('/ddns/status'),
 }
 
 // ─── Cluster ─────────────────────────────────────────────────────────────────

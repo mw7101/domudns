@@ -765,6 +765,36 @@ DELETE /api/ddns/keys/{name}
 
 **Response:** `204 No Content`
 
+### Get DDNS runtime status
+```http
+GET /api/ddns/status
+```
+
+Returns key count and runtime statistics of the DDNS handler.
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "key_count": 1,
+    "total_updates": 42,
+    "last_update_at": "2026-03-07T10:00:00Z",
+    "total_failed": 0,
+    "last_rejected_reason": "",
+    "last_rejected_at": null
+  }
+}
+```
+
+**Fields:**
+- `key_count`: number of configured TSIG keys
+- `total_updates`: successful UPDATE messages processed since last restart
+- `last_update_at`: timestamp of the last successful UPDATE
+- `total_failed`: total rejected UPDATE messages (NOTZONE, NOTAUTH, SERVFAIL)
+- `last_rejected_reason`: human-readable rejection reason (e.g. `"NOTZONE: home"`, `"NOTAUTH: TSIG-Verifikation fehlgeschlagen"`)
+- `last_rejected_at`: timestamp of the last rejection
+
 ### ISC dhcpd configuration
 
 After creating a TSIG key, add it to `/etc/dhcp/dhcpd.conf`:

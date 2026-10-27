@@ -321,6 +321,7 @@ func main() {
 
 	// DDNS API handler for REST API
 	ddnsAPIHandler := api.NewDDNSAPIHandler(store, dnsServer)
+	ddnsAPIHandler.SetStatsProvider(&ddnsStatsAdapter{handler: ddnsHandler})
 
 	// Connect cluster handler with reload callbacks
 	if clusterHandler != nil {
@@ -716,6 +717,24 @@ func toConditionalForwardRules(cfgs []config.ConditionalForward) []dnsserver.Con
 		}
 	}
 	return rules
+}
+
+// ddnsStatsAdapter verbindet DDNSHandler-Stats mit dem DDNSAPIHandler (vermeidet Zirkelimport).
+type ddnsStatsAdapter struct {
+	handler *dnsserver.DDNSHandler
+}
+
+func (a *ddnsStatsAdapter) GetDDNSStats() api.DDNSRuntimeStats {
+	s := a.handler.GetStats()
+	return api.DDNSRuntimeStats{
+		TotalUpdates:       s.TotalUpdates,
+		LastUpdateAt:       s.LastUpdateAt,
+		TotalFailed:        s.TotalFailed,
+		LastError:          s.LastError,
+		LastErrorAt:        s.LastErrorAt,
+		LastRejectedReason: s.LastRejectedReason,
+		LastRejectedAt:     s.LastRejectedAt,
+	}
 }
 
 // updateClusterCallbacks wires reload callbacks with the cluster handler.
