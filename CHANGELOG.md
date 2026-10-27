@@ -2,6 +2,12 @@
 
 All notable changes to DomU DNS will be documented in this file.
 
+## [v0.1.5]
+
+#### Fixed
+
+- **CNAME chasing for A queries** (`internal/dnsserver/zones.go`): Authoritative zones now return the CNAME record (plus the target's A record if it is in the same zone) when a client queries for type A on a name that only has a CNAME — previously the server returned an empty answer, causing `ping` and stub resolvers to fail even though `dig … in CNAME` succeeded (RFC 1034 §4.3.2).
+
 ## [v0.1.4]
 
 #### Added

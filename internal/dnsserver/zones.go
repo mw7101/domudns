@@ -133,6 +133,7 @@ func (z *ZoneManager) GenerateResponse(req *mdns.Msg, zone *dns.Zone, subdomain 
 
 	// Find matching records
 	var matchedRecords []dns.Record
+	var cnameRecords []dns.Record // CNAME records at this node (for CNAME chasing)
 	for _, rec := range zone.Records {
 		// Normalize record name
 		recName := rec.Name
@@ -148,6 +149,17 @@ func (z *ZoneManager) GenerateResponse(req *mdns.Msg, zone *dns.Zone, subdomain 
 			continue
 		}
 
+		// Collect CNAME records separately for RFC 1034 §4.3.2 CNAME chasing.
+		// CNAME at zone apex (@) is forbidden (RFC 1035) and handled in recordToRR.
+		if rec.Type == dns.TypeCNAME && subdomain != "@" {
+			cnameRecords = append(cnameRecords, rec)
+			// Only include in matchedRecords when CNAME or ANY is explicitly queried.
+			if qtype == mdns.TypeCNAME || qtype == mdns.TypeANY {
+				matchedRecords = append(matchedRecords, rec)
+			}
+			continue
+		}
+
 		// Match record type (or ANY)
 		if qtype != mdns.TypeANY && string(rec.Type) != mdns.TypeToString[qtype] {
 			continue
@@ -156,11 +168,46 @@ func (z *ZoneManager) GenerateResponse(req *mdns.Msg, zone *dns.Zone, subdomain 
 		matchedRecords = append(matchedRecords, rec)
 	}
 
-	// Add matched records to answer
-	for _, rec := range matchedRecords {
-		rr := z.recordToRR(zone, rec, subdomain)
-		if rr != nil {
+	// RFC 1034 §4.3.2: if no records of the requested type exist but a CNAME does,
+	// return the CNAME and follow the chain within this zone.
+	if len(matchedRecords) == 0 && len(cnameRecords) > 0 && qtype != mdns.TypeCNAME && qtype != mdns.TypeANY {
+		for _, rec := range cnameRecords {
+			rr := z.recordToRR(zone, rec, subdomain)
+			if rr == nil {
+				continue
+			}
 			resp.Answer = append(resp.Answer, rr)
+
+			// Try to resolve the CNAME target within this zone.
+			target := strings.ToLower(strings.TrimSuffix(mdns.Fqdn(rec.Value), "."))
+			zoneDomain := strings.ToLower(strings.TrimSuffix(zone.Domain, "."))
+			if strings.HasSuffix(target, "."+zoneDomain) {
+				targetSub := strings.TrimSuffix(target, "."+zoneDomain)
+				for _, rec2 := range zone.Records {
+					recName2 := rec2.Name
+					if recName2 == "@" || recName2 == "" {
+						recName2 = "@"
+					}
+					if recName2 != targetSub {
+						continue
+					}
+					if string(rec2.Type) != mdns.TypeToString[qtype] {
+						continue
+					}
+					rr2 := z.recordToRR(zone, rec2, targetSub)
+					if rr2 != nil {
+						resp.Answer = append(resp.Answer, rr2)
+					}
+				}
+			}
+		}
+	} else {
+		// Add matched records to answer
+		for _, rec := range matchedRecords {
+			rr := z.recordToRR(zone, rec, subdomain)
+			if rr != nil {
+				resp.Answer = append(resp.Answer, rr)
+			}
 		}
 	}
 
