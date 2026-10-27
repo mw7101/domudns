@@ -6,7 +6,7 @@ import { Topbar } from '@/components/layout/Topbar'
 import { AnimatedModal } from '@/components/ui/animated-modal'
 import { MovingBorderButton } from '@/components/ui/moving-border'
 import { useToast } from '@/components/shared/Toast'
-import { zones as zonesApi, records as recordsApi, type Zone, type DnsRecord } from '@/lib/api'
+import { zones as zonesApi, records as recordsApi, type Zone, type DnsRecord, type ImportResult } from '@/lib/api'
 import { formatRecordValue, RECORD_TYPE_COLORS } from '@/lib/utils'
 
 const RECORD_TYPES = ['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS', 'SRV', 'PTR', 'CAA', 'FWD']
@@ -39,6 +39,18 @@ function ZonesContent() {
   const [deletingZone, setDeletingZone] = useState<string | null>(null)
   const [savingRecord, setSavingRecord] = useState(false)
   const [deletingRecord, setDeletingRecord] = useState<number | null>(null)
+  const [exportingZone, setExportingZone] = useState(false)
+  const [importing, setImporting] = useState(false)
+
+  // Import Modal
+  const [importOpen, setImportOpen] = useState(false)
+  const [importTab, setImportTab] = useState<'file' | 'axfr'>('file')
+  const [importFile, setImportFile] = useState<File | null>(null)
+  const [importDomain, setImportDomain] = useState('')
+  const [importView, setImportView] = useState('')
+  const [axfrServer, setAxfrServer] = useState('')
+  const [axfrDomain, setAxfrDomain] = useState('')
+  const [axfrView, setAxfrView] = useState('')
 
   // Add Zone Modal
   const [addZoneOpen, setAddZoneOpen] = useState(false)
@@ -211,6 +223,74 @@ function ZonesContent() {
     }
   }
 
+  const handleExportZone = async (domain: string, view?: string) => {
+    if (exportingZone) return
+    setExportingZone(true)
+    try {
+      const content = await zonesApi.export(domain, view)
+      const blob = new Blob([content], { type: 'text/plain' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = domain + '.zone'
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (err: unknown) {
+      showToast(err instanceof Error ? err.message : 'Export fehlgeschlagen', 'error')
+    } finally {
+      setExportingZone(false)
+    }
+  }
+
+  const showImportResult = (res: { data: ImportResult }) => {
+    const { imported, merged, zone } = res.data
+    showToast(`Zone ${zone}: ${imported} Records importiert, ${merged} zusammengeführt`, 'success')
+  }
+
+  const handleImportFile = async () => {
+    if (!importFile || importing) return
+    setImporting(true)
+    try {
+      const res = await zonesApi.importFile(
+        importFile,
+        importDomain.trim() || undefined,
+        importView.trim() || undefined
+      )
+      showImportResult(res)
+      setImportOpen(false)
+      setImportFile(null)
+      setImportDomain('')
+      setImportView('')
+      await loadZones()
+    } catch (err: unknown) {
+      showToast(err instanceof Error ? err.message : 'Import fehlgeschlagen', 'error')
+    } finally {
+      setImporting(false)
+    }
+  }
+
+  const handleImportAXFR = async () => {
+    if (!axfrServer.trim() || !axfrDomain.trim() || importing) return
+    setImporting(true)
+    try {
+      const res = await zonesApi.importAXFR(
+        axfrServer.trim(),
+        axfrDomain.trim(),
+        axfrView.trim() || undefined
+      )
+      showImportResult(res)
+      setImportOpen(false)
+      setAxfrServer('')
+      setAxfrDomain('')
+      setAxfrView('')
+      await loadZones()
+    } catch (err: unknown) {
+      showToast(err instanceof Error ? err.message : 'AXFR-Import fehlgeschlagen', 'error')
+    } finally {
+      setImporting(false)
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -248,9 +328,18 @@ function ZonesContent() {
                   .join(' · ')}
               </p>
             </div>
-            <MovingBorderButton onClick={() => openRecordModal(selectedZone.domain)}>
-              + Record
-            </MovingBorderButton>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => handleExportZone(selectedZone.domain, selectedZone.view)}
+                disabled={exportingZone}
+                className="text-xs text-[#9a8cbf] hover:text-[#f0eeff] disabled:opacity-50 px-3 py-1.5 rounded-lg border border-[#2a1f42] hover:border-[#6b5f8a] transition-colors"
+              >
+                {exportingZone ? '…' : '↓ Export .zone'}
+              </button>
+              <MovingBorderButton onClick={() => openRecordModal(selectedZone.domain)}>
+                + Record
+              </MovingBorderButton>
+            </div>
           </div>
 
           <div className="bg-[#100c1e] neon-card rounded-2xl overflow-hidden">
@@ -458,7 +547,15 @@ function ZonesContent() {
               {zoneList.length} autoritative DNS-Zone{zoneList.length !== 1 ? 'n' : ''}
             </p>
           </div>
-          <MovingBorderButton onClick={() => setAddZoneOpen(true)}>+ Zone hinzufügen</MovingBorderButton>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setImportOpen(true)}
+              className="text-xs text-[#9a8cbf] hover:text-[#f0eeff] px-3 py-1.5 rounded-lg border border-[#2a1f42] hover:border-[#6b5f8a] transition-colors"
+            >
+              ↑ Importieren
+            </button>
+            <MovingBorderButton onClick={() => setAddZoneOpen(true)}>+ Zone hinzufügen</MovingBorderButton>
+          </div>
         </div>
 
         <div className="bg-[#100c1e] neon-card rounded-2xl overflow-hidden">
@@ -537,6 +634,136 @@ function ZonesContent() {
             </div>
           )}
         </div>
+
+        {/* Import Modal */}
+        <AnimatedModal
+          isOpen={importOpen}
+          onClose={() => { setImportOpen(false); setImportFile(null) }}
+          title="Zone importieren"
+        >
+          <div className="space-y-4">
+            {/* Tabs */}
+            <div className="flex gap-1 bg-[#080612] rounded-xl p-1">
+              {(['file', 'axfr'] as const).map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => setImportTab(tab)}
+                  className={`flex-1 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
+                    importTab === tab
+                      ? 'bg-violet-600/30 text-violet-300 border border-violet-500/50'
+                      : 'text-[#6b5f8a] hover:text-[#9a8cbf]'
+                  }`}
+                >
+                  {tab === 'file' ? 'Zone File' : 'AXFR Transfer'}
+                </button>
+              ))}
+            </div>
+
+            {importTab === 'file' ? (
+              <>
+                <div>
+                  <label className="block text-xs font-semibold text-[#9a8cbf] uppercase tracking-wider mb-2">
+                    Zone-Datei *
+                  </label>
+                  <input
+                    type="file"
+                    accept=".zone,.txt,text/plain"
+                    onChange={(e) => setImportFile(e.target.files?.[0] ?? null)}
+                    className="w-full text-sm text-[#9a8cbf] file:mr-3 file:px-3 file:py-1 file:rounded-lg file:border file:border-[#2a1f42] file:bg-[#100c1e] file:text-[#9a8cbf] file:text-xs file:cursor-pointer hover:file:text-[#f0eeff] transition-colors cursor-pointer"
+                  />
+                  <p className="text-xs text-[#6b5f8a] mt-1">RFC 1035 Zonendatei (BIND-Format, z.B. example.zone)</p>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-[#9a8cbf] uppercase tracking-wider mb-2">
+                    Domain (optional)
+                  </label>
+                  <input
+                    value={importDomain}
+                    onChange={(e) => setImportDomain(e.target.value)}
+                    placeholder="example.com — wird aus SOA ermittelt"
+                    className="w-full px-3 py-2 rounded-xl bg-[#080612] border border-[#2a1f42] text-[#f0eeff] text-sm focus:outline-none focus:border-violet-500 transition-colors placeholder-[#6b5f8a]"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-[#9a8cbf] uppercase tracking-wider mb-2">
+                    View (optional)
+                  </label>
+                  <input
+                    value={importView}
+                    onChange={(e) => setImportView(e.target.value)}
+                    placeholder="internal"
+                    className="w-full px-3 py-2 rounded-xl bg-[#080612] border border-[#2a1f42] text-[#f0eeff] text-sm focus:outline-none focus:border-violet-500 transition-colors placeholder-[#6b5f8a]"
+                  />
+                </div>
+                <div className="flex gap-3 pt-1">
+                  <button
+                    onClick={() => { setImportOpen(false); setImportFile(null) }}
+                    disabled={importing}
+                    className="flex-1 px-4 py-2 rounded-xl border border-[#2a1f42] text-[#9a8cbf] text-sm hover:text-[#f0eeff] disabled:opacity-50 transition-colors"
+                  >
+                    Abbrechen
+                  </button>
+                  <MovingBorderButton onClick={handleImportFile} disabled={importing || !importFile} className="flex-1">
+                    {importing
+                      ? <span className="flex items-center justify-center gap-2"><span className="inline-block w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" /> Importiert …</span>
+                      : 'Zone importieren'}
+                  </MovingBorderButton>
+                </div>
+              </>
+            ) : (
+              <>
+                <div>
+                  <label className="block text-xs font-semibold text-[#9a8cbf] uppercase tracking-wider mb-2">
+                    DNS-Server *
+                  </label>
+                  <input
+                    value={axfrServer}
+                    onChange={(e) => setAxfrServer(e.target.value)}
+                    placeholder="192.168.1.1 oder 192.168.1.1:53"
+                    className="w-full px-3 py-2 rounded-xl bg-[#080612] border border-[#2a1f42] text-[#f0eeff] text-sm focus:outline-none focus:border-violet-500 transition-colors placeholder-[#6b5f8a]"
+                  />
+                  <p className="text-xs text-[#6b5f8a] mt-1">IP oder Hostname des Quell-DNS-Servers (Standard: Port 53)</p>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-[#9a8cbf] uppercase tracking-wider mb-2">
+                    Domain *
+                  </label>
+                  <input
+                    value={axfrDomain}
+                    onChange={(e) => setAxfrDomain(e.target.value)}
+                    placeholder="example.com"
+                    className="w-full px-3 py-2 rounded-xl bg-[#080612] border border-[#2a1f42] text-[#f0eeff] text-sm focus:outline-none focus:border-violet-500 transition-colors placeholder-[#6b5f8a]"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-[#9a8cbf] uppercase tracking-wider mb-2">
+                    View (optional)
+                  </label>
+                  <input
+                    value={axfrView}
+                    onChange={(e) => setAxfrView(e.target.value)}
+                    placeholder="internal"
+                    className="w-full px-3 py-2 rounded-xl bg-[#080612] border border-[#2a1f42] text-[#f0eeff] text-sm focus:outline-none focus:border-violet-500 transition-colors placeholder-[#6b5f8a]"
+                  />
+                </div>
+                <div className="flex gap-3 pt-1">
+                  <button
+                    onClick={() => setImportOpen(false)}
+                    disabled={importing}
+                    className="flex-1 px-4 py-2 rounded-xl border border-[#2a1f42] text-[#9a8cbf] text-sm hover:text-[#f0eeff] disabled:opacity-50 transition-colors"
+                  >
+                    Abbrechen
+                  </button>
+                  <MovingBorderButton onClick={handleImportAXFR} disabled={importing || !axfrServer.trim() || !axfrDomain.trim()} className="flex-1">
+                    {importing
+                      ? <span className="flex items-center justify-center gap-2"><span className="inline-block w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" /> Überträgt …</span>
+                      : 'AXFR starten'}
+                  </MovingBorderButton>
+                </div>
+              </>
+            )}
+          </div>
+        </AnimatedModal>
 
         {/* Add Zone Modal */}
         <AnimatedModal

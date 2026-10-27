@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net"
 	"net/http"
 	"strings"
@@ -75,26 +76,33 @@ type rateLimitEntry struct {
 // RateLimitMiddleware returns a middleware that limits requests per IP.
 // Stale entries are evicted periodically to prevent unbounded map growth.
 // When trustProxy is true, client IP is taken from X-Real-IP or X-Forwarded-For.
-func RateLimitMiddleware(requestsPerMinute int, trustProxy bool, next http.Handler) http.Handler {
+// The cleanup goroutine stops when ctx is cancelled (e.g. server shutdown).
+func RateLimitMiddleware(ctx context.Context, requestsPerMinute int, trustProxy bool, next http.Handler) http.Handler {
 	if requestsPerMinute <= 0 {
 		return next
 	}
 	limiters := make(map[string]*rateLimitEntry)
 	var mu sync.Mutex
 
-	// Periodically evict limiters not used for rateLimitIdleTTL
+	// Periodically evict limiters not used for rateLimitIdleTTL.
+	// Stops when ctx is cancelled to avoid goroutine leaks.
 	go func() {
 		ticker := time.NewTicker(rateLimitCleanupInterval)
 		defer ticker.Stop()
-		for range ticker.C {
-			mu.Lock()
-			cutoff := time.Now().Add(-rateLimitIdleTTL)
-			for ip, ent := range limiters {
-				if ent.lastUsed.Before(cutoff) {
-					delete(limiters, ip)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				mu.Lock()
+				cutoff := time.Now().Add(-rateLimitIdleTTL)
+				for ip, ent := range limiters {
+					if ent.lastUsed.Before(cutoff) {
+						delete(limiters, ip)
+					}
 				}
+				mu.Unlock()
 			}
-			mu.Unlock()
 		}
 	}()
 
@@ -139,7 +147,7 @@ func AuthMiddleware(auth *AuthManager, sessions *SessionManager, next http.Handl
 		// 2. Check bearer token (API/curl)
 		if authHeader := r.Header.Get("Authorization"); strings.HasPrefix(authHeader, "Bearer ") {
 			key := strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
-			if auth.ValidateAnyKey(key) {
+			if auth.ValidateAnyKey(r.Context(), key) {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -149,7 +157,7 @@ func AuthMiddleware(auth *AuthManager, sessions *SessionManager, next http.Handl
 
 		// 3. Check basic auth (password = named API key, for Traefik httpreq provider)
 		if _, password, ok := r.BasicAuth(); ok {
-			if auth.ValidateAnyKey(password) {
+			if auth.ValidateAnyKey(r.Context(), password) {
 				next.ServeHTTP(w, r)
 				return
 			}

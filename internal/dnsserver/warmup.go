@@ -39,7 +39,9 @@ func (s *Server) WarmCache(ctx context.Context, qlog QueryLogReader, count int) 
 		return
 	}
 
-	sem := make(chan struct{}, 10)
+	// 6 goroutines: balances parallelism on RPi 3B (4 cores) with DNS server load.
+	const warmupConcurrency = 6
+	sem := make(chan struct{}, warmupConcurrency)
 	var wg sync.WaitGroup
 	var warmed atomic.Int64
 

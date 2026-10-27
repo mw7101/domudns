@@ -3,6 +3,8 @@ package cluster
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -46,16 +48,25 @@ func (p *Propagator) Push(eventType SyncEventType, data interface{}) {
 		log.Warn().Err(err).Str("event", string(eventType)).Msg("cluster: marshal sync data failed")
 		return
 	}
+	nonceBytes := make([]byte, 16)
+	if _, err := rand.Read(nonceBytes); err != nil {
+		log.Warn().Err(err).Msg("cluster: generate nonce failed")
+		return
+	}
+	nonce := hex.EncodeToString(nonceBytes)
+	timestamp := time.Now().UnixNano()
 	req := SyncRequest{
-		Type: eventType,
-		Data: json.RawMessage(dataBytes),
+		Type:      eventType,
+		Data:      json.RawMessage(dataBytes),
+		Timestamp: timestamp,
+		Nonce:     nonce,
 	}
 	body, err := json.Marshal(req)
 	if err != nil {
 		log.Warn().Err(err).Msg("cluster: marshal sync request failed")
 		return
 	}
-	hmacValue := computeHMAC(p.secret, eventType, dataBytes)
+	hmacValue := computeHMAC(p.secret, eventType, timestamp, nonce, dataBytes)
 
 	var wg sync.WaitGroup
 	for _, slave := range p.slaves {

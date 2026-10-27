@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -109,7 +110,7 @@ func main() {
 	authManager.SetNamedKeyStore(store)
 
 	if !authManager.IsSetupCompleted() {
-		log.Info().Msg("setup wizard active: http://<host>/setup — default login: admin/admin")
+		log.Info().Msg("setup wizard active — open http://<host>/setup to complete initial configuration")
 	}
 
 	if cfg.Blocklist.Enabled && cfg.Blocklist.FilePath != "" {
@@ -303,14 +304,18 @@ func main() {
 			Msg("DHCP lease sync configured")
 	}
 
-	// splitHorizonResolver is declared here and optionally initialized below.
-	// Must be declared before splitHorizonUpdater (closure capture).
+	// splitHorizonResolver is guarded by splitHorizonMu because both
+	// splitHorizonUpdater (HTTP handler) and configReloader (HTTP handler)
+	// may access it concurrently after server start.
+	var splitHorizonMu sync.Mutex
 	var splitHorizonResolver *dnsserver.SplitHorizonResolver
 
 	// Split-Horizon-API-Handler
 	splitHorizonUpdater := func(newCfg config.SplitHorizonConfig) error {
+		splitHorizonMu.Lock()
+		defer splitHorizonMu.Unlock()
 		if splitHorizonResolver == nil && newCfg.Enabled {
-			// Lazy initialization: create resolver when first enabled
+			// Lazy initialization: create resolver when first enabled via API
 			views, err := toSplitHorizonViews(newCfg.Views)
 			if err != nil {
 				return fmt.Errorf("split-horizon: invalid CIDR: %w", err)
@@ -406,10 +411,13 @@ func main() {
 			updatedCfg.System.Security.RebindingProtection,
 			updatedCfg.System.Security.RebindingProtectionWhitelist,
 		)
-		if splitHorizonResolver != nil {
+		splitHorizonMu.Lock()
+		localResolver := splitHorizonResolver
+		splitHorizonMu.Unlock()
+		if localResolver != nil {
 			views, err := toSplitHorizonViews(updatedCfg.DNSServer.SplitHorizon.Views)
 			if err == nil {
-				splitHorizonResolver.Update(updatedCfg.DNSServer.SplitHorizon.Enabled, views)
+				localResolver.Update(updatedCfg.DNSServer.SplitHorizon.Enabled, views)
 			}
 		}
 		// AXFR AllowedIPs live-reload (nur wenn AXFR aktiviert)
@@ -484,12 +492,19 @@ func main() {
 	})
 
 	// Cache warming (asynchronous, does not block server startup)
-	if cfg.DNSServer.Cache.Enabled {
+	if cfg.DNSServer.Cache.Enabled && !cfg.DNSServer.Cache.WarmupDisabled {
 		count := cfg.DNSServer.Cache.WarmupCount
 		if count == 0 {
 			count = 200
 		}
-		go dnsServer.WarmCache(gctx, qLogger, count)
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Error().Interface("panic", r).Msg("cache warmup: recovered panic")
+				}
+			}()
+			dnsServer.WarmCache(gctx, qLogger, count)
+		}()
 	}
 
 	// Start HTTP server

@@ -102,8 +102,8 @@ func (h *ACMEHandler) present(ctx context.Context, w http.ResponseWriter, r *htt
 		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "domain and txt_value required")
 		return
 	}
-	if len(req.TXTValue) > 512 {
-		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "txt_value exceeds 512 bytes")
+	if len(req.TXTValue) > 255 {
+		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "txt_value exceeds 255 bytes (RFC 1035)")
 		return
 	}
 	domain := strings.TrimSuffix(req.Domain, ".")
@@ -172,8 +172,8 @@ func (h *ACMEHandler) httpreqPresent(ctx context.Context, w http.ResponseWriter,
 		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "fqdn and value required")
 		return
 	}
-	if len(req.Value) > 512 {
-		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "value exceeds 512 bytes")
+	if len(req.Value) > 255 {
+		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "value exceeds 255 bytes (RFC 1035)")
 		return
 	}
 	// Traefik sends FQDN with trailing dot, e.g. "_acme-challenge.example.com."

@@ -194,12 +194,13 @@ type DNSServerConfig struct {
 
 // CacheConfig holds cache settings.
 type CacheConfig struct {
-	Enabled       bool `yaml:"enabled"         json:"enabled"`
-	Size          int  `yaml:"size"             json:"size"`
-	TTL           int  `yaml:"ttl"              json:"ttl"`
-	NegativeTTL   int  `yaml:"negative_ttl"     json:"negative_ttl"`
-	WarmupEnabled bool `yaml:"warmup_enabled"   json:"warmup_enabled"`
-	WarmupCount   int  `yaml:"warmup_count"     json:"warmup_count"`
+	Enabled        bool `yaml:"enabled"          json:"enabled"`
+	Size           int  `yaml:"size"             json:"size"`
+	TTL            int  `yaml:"ttl"              json:"ttl"`
+	NegativeTTL    int  `yaml:"negative_ttl"     json:"negative_ttl"`
+	WarmupEnabled  bool `yaml:"warmup_enabled"   json:"warmup_enabled"`  // deprecated: use warmup_disabled
+	WarmupDisabled bool `yaml:"warmup_disabled"  json:"warmup_disabled"` // set true to opt out of cache warming
+	WarmupCount    int  `yaml:"warmup_count"     json:"warmup_count"`
 }
 
 // CaddyConfig holds Caddy web server settings.
@@ -466,9 +467,6 @@ func applyDefaults(cfg *Config) {
 	// Cache-Warmup Defaults
 	if cfg.DNSServer.Cache.WarmupCount == 0 {
 		cfg.DNSServer.Cache.WarmupCount = 200
-	}
-	if cfg.DNSServer.Cache.Enabled {
-		cfg.DNSServer.Cache.WarmupEnabled = true
 	}
 
 	// DHCP-Lease-Sync Defaults

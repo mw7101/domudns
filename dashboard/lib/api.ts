@@ -25,27 +25,36 @@ export class ApiError extends Error {
   }
 }
 
+const REQUEST_TIMEOUT_MS = 30_000
+
 async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
-  const res = await fetch(API_BASE + path, {
-    ...opts,
-    headers: {
-      'Content-Type': 'application/json',
-      ...authHeaders(),
-      ...(opts.headers as Record<string, string> | undefined),
-    },
-  })
-  const data = await res.json().catch(() => ({}))
-  if (res.status === 401) {
-    if (typeof window !== 'undefined') {
-      window.location.href = '/login/?redirect=' + encodeURIComponent(window.location.pathname)
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+  try {
+    const res = await fetch(API_BASE + path, {
+      ...opts,
+      signal: controller.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        ...authHeaders(),
+        ...(opts.headers as Record<string, string> | undefined),
+      },
+    })
+    const data = await res.json().catch(() => ({}))
+    if (res.status === 401) {
+      if (typeof window !== 'undefined') {
+        window.location.href = '/login/?redirect=' + encodeURIComponent(window.location.pathname)
+      }
+      throw new ApiError('Nicht angemeldet', 401)
     }
-    throw new ApiError('Nicht angemeldet', 401)
+    if (!res.ok) {
+      const msg = (data as { error?: { message?: string } })?.error?.message ?? res.statusText
+      throw new ApiError(msg, res.status)
+    }
+    return data as T
+  } finally {
+    clearTimeout(timeoutId)
   }
-  if (!res.ok) {
-    const msg = (data as { error?: { message?: string } })?.error?.message ?? res.statusText
-    throw new ApiError(msg, res.status)
-  }
-  return data as T
 }
 
 async function requestText(path: string): Promise<string> {
@@ -168,6 +177,12 @@ export const health = {
 
 // ─── Zones ───────────────────────────────────────────────────────────────────
 
+export interface ImportResult {
+  zone: string
+  imported: number
+  merged: number
+}
+
 export const zones = {
   list: () => request<{ data: Zone[] }>('/zones'),
   get: (domain: string) => request<{ data: Zone }>('/zones/' + encodeURIComponent(domain)),
@@ -180,6 +195,48 @@ export const zones = {
   deleteView: (domain: string, view: string) =>
     request<void>('/zones/' + encodeURIComponent(domain) + '?view=' + encodeURIComponent(view), {
       method: 'DELETE',
+    }),
+
+  /** Export a zone as an RFC 1035 zone file. Returns the file content as text. */
+  export: async (domain: string, view?: string): Promise<string> => {
+    const qs = view ? '?view=' + encodeURIComponent(view) : ''
+    const res = await fetch(API_BASE + '/zones/' + encodeURIComponent(domain) + '/export' + qs, {
+      headers: authHeaders(),
+    })
+    if (res.status === 401) throw new ApiError('Nicht angemeldet', 401)
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}))
+      const msg = (data as { error?: { message?: string } })?.error?.message ?? res.statusText
+      throw new ApiError(msg, res.status)
+    }
+    return res.text()
+  },
+
+  /** Import a zone from an RFC 1035 zone file. */
+  importFile: async (file: File, domain?: string, view?: string): Promise<{ data: ImportResult }> => {
+    const form = new FormData()
+    form.append('file', file)
+    if (domain) form.append('domain', domain)
+    if (view) form.append('view', view)
+    const res = await fetch(API_BASE + '/zones/import', {
+      method: 'POST',
+      headers: authHeaders(), // no Content-Type: browser sets multipart boundary automatically
+      body: form,
+    })
+    if (res.status === 401) throw new ApiError('Nicht angemeldet', 401)
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      const msg = (data as { error?: { message?: string } })?.error?.message ?? res.statusText
+      throw new ApiError(msg, res.status)
+    }
+    return data as { data: ImportResult }
+  },
+
+  /** Import a zone via AXFR transfer from a remote DNS server. */
+  importAXFR: (server: string, domain: string, view?: string): Promise<{ data: ImportResult }> =>
+    request<{ data: ImportResult }>('/zones/import/axfr', {
+      method: 'POST',
+      body: JSON.stringify({ server, domain, view: view ?? '' }),
     }),
 }
 
